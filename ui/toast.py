@@ -50,11 +50,10 @@ class ToastWidget(QWidget):
             body_lbl.setWordWrap(True)
             root.addWidget(body_lbl)
 
-        self.setFixedWidth(240)
-        self.adjustSize()
+        self.setFixedSize(260, 72)
 
-        # Auto-dismiss after 8 s
-        QTimer.singleShot(8_000, self.close)
+        # Auto-dismiss after 10 s
+        QTimer.singleShot(10_000, self.close)
 
     # ── Rounded dark background ───────────────────────────────────────────────
 

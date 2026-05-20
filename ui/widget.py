@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from PyQt5.QtWidgets import QWidget, QMenu, QAction, QDialog, QVBoxLayout, QLabel, QMessageBox
+from PyQt5.QtWidgets import QWidget, QMenu, QAction, QDialog, QVBoxLayout, QLabel, QMessageBox, QProgressBar
 from PyQt5.QtCore    import Qt, QTimer, QPoint, pyqtSlot, pyqtSignal
 from PyQt5.QtGui     import QPainter
 
@@ -59,8 +59,9 @@ class BlacksmithWidget(QWidget):
 
     # Signals used to marshal results from background threads → main thread
     _update_ready = pyqtSignal(str, str, bool)  # (tag, download_url, show_toast)
-    _dl_done      = pyqtSignal(bool)       # download finished (success?)
-    _check_msg    = pyqtSignal(str, str)   # (title, body) info message
+    _dl_progress  = pyqtSignal(int)             # download progress 0-100
+    _dl_done      = pyqtSignal(bool)            # download finished (success?)
+    _check_msg    = pyqtSignal(str, str)        # (title, body) info message
 
     def __init__(self):
         super().__init__()
@@ -107,10 +108,11 @@ class BlacksmithWidget(QWidget):
         self._settings_dialog: SettingsDialog | None = None
 
         # Auto-update state
-        self._update_dlg:     QDialog | None = None
-        self._update_new_exe: str            = ""
-        self._update_old_exe: str            = ""
-        self._pending_update: dict | None    = None   # {"tag":…,"url":…} when update found
+        self._update_dlg:     QDialog | None  = None
+        self._update_new_exe: str             = ""
+        self._update_old_exe: str             = ""
+        self._pending_update: dict | None     = None   # {"tag":…,"url":…} when update found
+        self._update_toast:   object          = None   # keep reference so GC doesn't kill it
         self._update_ready.connect(self._on_update_ready)
         self._dl_done.connect(self._on_dl_done)
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
@@ -357,22 +359,37 @@ class BlacksmithWidget(QWidget):
             self._show_update_toast(tag)
 
     def _show_update_toast(self, tag: str):
-        """Show a small non-intrusive bubble near the widget."""
+        """Show a small notification bubble just above the hammer / anvil area.
+        Falls back to bottom-right corner if there is not enough room above."""
         from ui.toast import ToastWidget
         from PyQt5.QtWidgets import QApplication
-        toast = ToastWidget(
-            f"🆕 發現新版本 {tag}",
-            "右鍵選單即可更新。",
-        )
-        # Position: above the main widget, right-aligned
-        geo    = self.frameGeometry()
-        screen = QApplication.desktop().availableGeometry(self)
-        toast.adjustSize()
+        from config import KB_X, KB_Y, HEAD_PERP, SCALE
+
+        toast = ToastWidget(f"🆕 發現新版本 {tag}", "右鍵選單即可更新。")
         tw, th = toast.width(), toast.height()
-        x = max(screen.left(), min(geo.right() - tw,  screen.right()  - tw))
-        y = max(screen.top(),  min(geo.top()  - th - 8, screen.bottom() - th))
-        toast.move(x, y)
+
+        screen = QApplication.desktop().availableGeometry(self)
+        wp = self.pos()                       # widget top-left in screen coords
+
+        # Hammer centre in widget pixels
+        hx_w = int(KB_X   * SCALE)           # ≈ 271
+        hy_w = int((KB_Y - HEAD_PERP) * SCALE)  # top of hammer head ≈ 121
+
+        # Preferred: centred horizontally on hammer, bottom flush 10 px above head
+        tx = wp.x() + hx_w - tw // 2
+        ty = wp.y() + hy_w - th - 10
+
+        # Clamp horizontally inside the available screen area
+        tx = max(screen.left() + 8, min(tx, screen.right() - tw - 8))
+
+        # If there is not enough room above, fall back to bottom-right corner
+        if ty < screen.top() + 8:
+            tx = screen.right()  - tw - 16
+            ty = screen.bottom() - th - 16
+
+        toast.move(tx, ty)
         toast.show()
+        self._update_toast = toast  # prevent GC from destroying the window
 
     def _prompt_and_update(self):
         """Called when player clicks the 'new version' menu item."""
@@ -391,7 +408,7 @@ class BlacksmithWidget(QWidget):
             self._do_update(tag, url)
 
     def _do_update(self, tag: str, url: str):
-        """Start download in background; show a waiting dialog."""
+        """Start download in background; show a progress dialog."""
         if not getattr(sys, "frozen", False):
             QMessageBox.information(
                 self, "更新",
@@ -406,6 +423,7 @@ class BlacksmithWidget(QWidget):
         self._update_old_exe = old_exe
         self._update_new_exe = new_exe
 
+        # Build progress dialog
         dlg = QDialog(self)
         dlg.setWindowTitle("更新中")
         dlg.setWindowFlags(
@@ -413,18 +431,32 @@ class BlacksmithWidget(QWidget):
             Qt.CustomizeWindowHint | Qt.WindowTitleHint
         )
         layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel(f"正在下載 {tag}，請稍候…"))
-        dlg.setFixedSize(290, 72)
+        layout.setContentsMargins(14, 12, 14, 14)
+        layout.setSpacing(8)
+        layout.addWidget(QLabel(f"正在下載 {tag}…"))
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        bar.setTextVisible(True)
+        layout.addWidget(bar)
+        dlg.setFixedSize(300, 88)
         self._update_dlg = dlg
+        self._dl_progress.connect(bar.setValue)
         dlg.show()
 
-        threading.Thread(
-            target=lambda: self._dl_done.emit(upd.download_exe(url, new_exe)),
-            daemon=True,
-        ).start()
+        def _dl():
+            ok = upd.download_exe(url, new_exe,
+                                  progress_cb=self._dl_progress.emit)
+            self._dl_done.emit(ok)
+
+        threading.Thread(target=_dl, daemon=True).start()
 
     def _on_dl_done(self, success: bool):
         if self._update_dlg:
+            try:
+                self._dl_progress.disconnect()
+            except Exception:
+                pass
             self._update_dlg.close()
             self._update_dlg = None
 

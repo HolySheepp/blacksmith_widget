@@ -52,13 +52,29 @@ def fetch_latest(timeout: int = 6) -> dict | None:
     return None
 
 
-def download_exe(url: str, dest: str) -> bool:
+def download_exe(url: str, dest: str, progress_cb=None) -> bool:
     """
-    Download url → dest (blocking).
-    Cleans up partial file on failure.  Returns True on success.
+    Stream-download url → dest with an optional progress callback.
+    progress_cb(pct: int) is called with 0-100 as data arrives.
+    30 s connection timeout.  Cleans up partial file on failure.
+    Returns True on success.
     """
     try:
-        urllib.request.urlretrieve(url, dest)
+        req = urllib.request.Request(url, headers=_HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            total = int(resp.headers.get("Content-Length") or 0)
+            done  = 0
+            with open(dest, "wb") as f:
+                while True:
+                    chunk = resp.read(65_536)   # 64 KB chunks
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    if progress_cb and total > 0:
+                        progress_cb(int(done * 100 / total))
+        if progress_cb:
+            progress_cb(100)
         return True
     except Exception:
         try:
@@ -77,18 +93,37 @@ def exe_path() -> str:
 
 def launch_updater(new_exe: str, old_exe: str) -> None:
     """
-    Write _bsw_updater.bat next to old_exe, then launch it hidden.
-    The bat waits ~3 s for the old process to exit, moves new_exe over
-    old_exe, launches it, and deletes itself.
+    Write _bsw_updater.bat to %TEMP% (guaranteed ASCII path) and launch it
+    hidden.  The bat waits for the old process to exit, retries the move
+    until it succeeds, then relaunches the exe and deletes itself.
     The caller must call self.close() immediately after this.
     """
-    bat = os.path.join(os.path.dirname(old_exe), "_bsw_updater.bat")
-    with open(bat, "w", encoding="ascii") as f:
-        f.write("@echo off\n")
-        f.write("timeout /t 3 /nobreak >nul\n")
-        f.write(f'move /y "{new_exe}" "{old_exe}"\n')
-        f.write(f'start "" "{old_exe}"\n')
-        f.write('del "%~f0"\n')
+    import tempfile
+    bat = os.path.join(tempfile.gettempdir(), "_bsw_updater.bat")
+
+    # utf-8-sig (BOM) + chcp 65001 lets cmd.exe handle paths that contain
+    # Chinese or other non-ASCII characters.
+    content = (
+        "@echo off\n"
+        "chcp 65001 >nul\n"
+        "timeout /t 5 /nobreak >nul\n"
+        ":retry\n"
+        f'move /y "{new_exe}" "{old_exe}" >nul 2>&1\n'
+        "if errorlevel 1 (\n"
+        "    timeout /t 2 /nobreak >nul\n"
+        "    goto retry\n"
+        ")\n"
+        # Unblock the downloaded file (removes Zone.Identifier / SmartScreen flag)
+        f'powershell -Command "Unblock-File -LiteralPath \'{old_exe}\'" >nul 2>&1\n'
+        # Use PowerShell Start-Process instead of cmd's "start" so the new exe
+        # inherits a proper long-path environment (avoids FRANCI~1 short-name
+        # issue that breaks PyInstaller's python DLL search at launch time).
+        f'powershell -Command "Start-Process -FilePath \'{old_exe}\'" >nul 2>&1\n'
+        'del "%~f0"\n'
+    )
+    with open(bat, "w", encoding="utf-8-sig") as f:
+        f.write(content)
+
     subprocess.Popen(
         ["cmd", "/c", bat],
         creationflags=subprocess.CREATE_NO_WINDOW,
