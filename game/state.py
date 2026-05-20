@@ -110,6 +110,12 @@ class GameState:
         self.show_charge_bar: bool = bool(_sv.get("show_charge_bar", False))
         self.autostart:       bool = bool(_sv.get("autostart",       True))
 
+        # Widget position (logical pixels).  None = let Qt decide on first launch.
+        _wx = _sv.get("widget_x")
+        _wy = _sv.get("widget_y")
+        self.widget_x: int | None = int(_wx) if _wx is not None else None
+        self.widget_y: int | None = int(_wy) if _wy is not None else None
+
         # ── Play time ──────────────────────────────────────────────────────
         self.play_time: float = float(_sv.get("play_time", 0.0))
 
@@ -284,6 +290,8 @@ class GameState:
             "fever_cooldown_duration": self.fever_cooldown_duration,
             "autostart":               self.autostart,
             "charge_ex_lift":          self.charge_ex_lift,
+            "widget_x":                self.widget_x,
+            "widget_y":                self.widget_y,
         }
 
     def reset_save(self):
@@ -326,6 +334,8 @@ class GameState:
         self.show_click      = True
         self.show_charge_bar = False
         self.autostart       = True
+        self.widget_x        = None
+        self.widget_y        = None
         # Visuals
         self.strike_flash = 0.0
         self.anvil_glow   = 0.0

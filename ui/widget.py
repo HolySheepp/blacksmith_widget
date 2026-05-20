@@ -66,6 +66,10 @@ class BlacksmithWidget(QWidget):
         self.state = GameState()
         _autostart_set(self.state.autostart)   # apply saved autostart preference on every launch
 
+        # Restore last window position (saved in logical pixels)
+        if self.state.widget_x is not None and self.state.widget_y is not None:
+            self.move(self.state.widget_x, self.state.widget_y)
+
         self.listener = KeyboardListener()
         self.listener.key_pressed.connect(self._on_key)
         self.listener.start()
@@ -93,6 +97,27 @@ class BlacksmithWidget(QWidget):
         # Settings dialog
         self._settings_dialog: SettingsDialog | None = None
 
+    # ── Screen helpers ────────────────────────────────────────────────────────
+
+    def _ensure_on_screen(self):
+        """If the widget is entirely off every screen, snap to primary screen centre."""
+        from PyQt5.QtWidgets import QApplication
+        desktop = QApplication.desktop()
+        frame   = self.frameGeometry()
+        on_any  = any(
+            desktop.screenGeometry(i).intersects(frame)
+            for i in range(desktop.screenCount())
+        )
+        if not on_any:
+            geo = desktop.availableGeometry()          # primary screen
+            self.move(geo.center() - self.rect().center())
+
+    def _move_to_center(self):
+        """Move widget to the centre of whichever screen it currently overlaps."""
+        from PyQt5.QtWidgets import QApplication
+        geo = QApplication.desktop().availableGeometry(self)
+        self.move(geo.center() - self.rect().center())
+
     # ── Game loop ─────────────────────────────────────────────────────────────
 
     def _tick(self):
@@ -106,6 +131,10 @@ class BlacksmithWidget(QWidget):
 
     def _autosave(self):
         write_save(self.state.to_save())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._ensure_on_screen()
 
     # ── Paint ─────────────────────────────────────────────────────────────────
 
@@ -236,6 +265,12 @@ class BlacksmithWidget(QWidget):
 
         menu.addSeparator()
 
+        center_act = QAction("📌  移回螢幕中央", self)
+        center_act.triggered.connect(self._move_to_center)
+        menu.addAction(center_act)
+
+        menu.addSeparator()
+
         quit_act = QAction("✕  退出", self)
         quit_act.triggered.connect(self.close)
         menu.addAction(quit_act)
@@ -265,6 +300,13 @@ class BlacksmithWidget(QWidget):
     def closeEvent(self, event):
         self._save_timer.stop()
         self._timer.stop()
-        self.listener.stop()
+        pos = self.pos()
+        self.state.widget_x = pos.x()
+        self.state.widget_y = pos.y()
         write_save(self.state.to_save())
         super().closeEvent(event)
+        # Explicitly quit the event loop so aboutToQuit fires and os._exit(0) runs.
+        # We cannot rely on setQuitOnLastWindowClosed because a dev-tools or
+        # settings dialog may still be visible when the main widget closes.
+        from PyQt5.QtWidgets import QApplication
+        QApplication.instance().quit()
