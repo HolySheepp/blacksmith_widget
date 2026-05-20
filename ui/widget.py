@@ -113,6 +113,9 @@ class BlacksmithWidget(QWidget):
         self._update_old_exe: str             = ""
         self._pending_update: dict | None     = None   # {"tag":…,"url":…} when update found
         self._update_toast:   object          = None   # keep reference so GC doesn't kill it
+        self._update_dlg_lbl: object          = None   # QLabel inside download dialog
+        self._countdown_timer: QTimer | None  = None   # fires every 1 s during restart countdown
+        self._countdown_n:    int             = 0      # seconds remaining
         self._update_ready.connect(self._on_update_ready)
         self._dl_done.connect(self._on_dl_done)
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
@@ -433,14 +436,17 @@ class BlacksmithWidget(QWidget):
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(14, 12, 14, 14)
         layout.setSpacing(8)
-        layout.addWidget(QLabel(f"正在下載 {tag}…"))
+        lbl = QLabel(f"正在下載 {tag}…")
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
         bar = QProgressBar()
         bar.setRange(0, 100)
         bar.setValue(0)
         bar.setTextVisible(True)
         layout.addWidget(bar)
         dlg.setFixedSize(300, 88)
-        self._update_dlg = dlg
+        self._update_dlg     = dlg
+        self._update_dlg_lbl = lbl        # kept so _on_dl_done can update text
         self._dl_progress.connect(bar.setValue)
         dlg.show()
 
@@ -452,25 +458,59 @@ class BlacksmithWidget(QWidget):
         threading.Thread(target=_dl, daemon=True).start()
 
     def _on_dl_done(self, success: bool):
-        if self._update_dlg:
-            try:
-                self._dl_progress.disconnect()
-            except Exception:
-                pass
-            self._update_dlg.close()
-            self._update_dlg = None
+        try:
+            self._dl_progress.disconnect()
+        except Exception:
+            pass
 
         if success:
             self._pending_update = None   # update applied — clear flag
-            QMessageBox.information(self, "下載完成", "下載完成！遊戲即將重啟套用更新。")
-            import update as upd
-            upd.launch_updater(self._update_new_exe, self._update_old_exe)
-            self.close()
+            # ── Show countdown in the existing dialog — no extra click needed ──
+            if self._update_dlg_lbl:
+                self._update_dlg_lbl.setText(
+                    "✅  下載完成！\n"
+                    "遊戲將在 3 秒後自動重啟套用更新，\n"
+                    "⚠️  無需手動操作。"
+                )
+            if self._update_dlg:
+                self._update_dlg.setFixedSize(300, 112)
+            self._countdown_n = 3
+            self._countdown_timer = QTimer(self)
+            self._countdown_timer.setInterval(1000)
+            self._countdown_timer.timeout.connect(self._on_restart_countdown)
+            self._countdown_timer.start()
         else:
+            if self._update_dlg:
+                self._update_dlg.close()
+                self._update_dlg     = None
+                self._update_dlg_lbl = None
             QMessageBox.warning(
                 self, "下載失敗",
                 "下載失敗，請稍後再試，或至 GitHub 手動下載最新版本。",
             )
+
+    def _on_restart_countdown(self):
+        """Called every second after a successful download; restarts at 0."""
+        self._countdown_n -= 1
+        if self._countdown_n > 0:
+            if self._update_dlg_lbl:
+                self._update_dlg_lbl.setText(
+                    f"✅  下載完成！\n"
+                    f"遊戲將在 {self._countdown_n} 秒後自動重啟套用更新，\n"
+                    f"⚠️  無需手動操作。"
+                )
+        else:
+            # Time's up — tear down and restart
+            if self._countdown_timer:
+                self._countdown_timer.stop()
+                self._countdown_timer = None
+            if self._update_dlg:
+                self._update_dlg.close()
+                self._update_dlg     = None
+                self._update_dlg_lbl = None
+            import update as upd
+            upd.launch_updater(self._update_new_exe, self._update_old_exe)
+            self.close()
 
     def _check_update_manual(self):
         """Context-menu manual check — if update already found, go straight to prompt."""

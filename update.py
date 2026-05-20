@@ -123,7 +123,7 @@ def launch_updater(new_exe: str, old_exe: str) -> None:
     content = (
         "@echo off\n"
         "chcp 65001 >nul\n"
-        "timeout /t 5 /nobreak >nul\n"
+        "timeout /t 2 /nobreak >nul\n"
         ":retry\n"
         f'move /y "{new_exe}" "{old_exe}" >nul 2>&1\n'
         "if errorlevel 1 (\n"
