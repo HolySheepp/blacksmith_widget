@@ -9,10 +9,11 @@ BlacksmithWidget — transparent, always-on-top desktop widget.
 """
 import subprocess
 import sys
+import threading
 import time
 
-from PyQt5.QtWidgets import QWidget, QMenu, QAction
-from PyQt5.QtCore    import Qt, QTimer, QPoint, pyqtSlot
+from PyQt5.QtWidgets import QWidget, QMenu, QAction, QDialog, QVBoxLayout, QLabel, QMessageBox
+from PyQt5.QtCore    import Qt, QTimer, QPoint, pyqtSlot, pyqtSignal
 from PyQt5.QtGui     import QPainter
 
 from config         import WIDGET_W, WIDGET_H
@@ -27,6 +28,7 @@ from ui.settings    import _autostart_set
 _FRAME_MS      = 16
 _AUTOSAVE_MS   = 60_000
 _DRAG_THRESH2  = 25
+_UPDATE_MS     = 3_600_000   # hourly update check interval (ms)
 
 # ── Dev Tools trigger triangle ────────────────────────────────────────────────
 # User specified widget-space vertices at scale=0.5:
@@ -54,6 +56,11 @@ def _in_dt_zone(px: float, py: float, scale: float) -> bool:
 
 
 class BlacksmithWidget(QWidget):
+
+    # Signals used to marshal results from background threads → main thread
+    _update_ready = pyqtSignal(str, str, bool)  # (tag, download_url, show_toast)
+    _dl_done      = pyqtSignal(bool)       # download finished (success?)
+    _check_msg    = pyqtSignal(str, str)   # (title, body) info message
 
     def __init__(self):
         super().__init__()
@@ -98,6 +105,22 @@ class BlacksmithWidget(QWidget):
 
         # Settings dialog
         self._settings_dialog: SettingsDialog | None = None
+
+        # Auto-update state
+        self._update_dlg:     QDialog | None = None
+        self._update_new_exe: str            = ""
+        self._update_old_exe: str            = ""
+        self._pending_update: dict | None    = None   # {"tag":…,"url":…} when update found
+        self._update_ready.connect(self._on_update_ready)
+        self._dl_done.connect(self._on_dl_done)
+        self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
+        # Start update checks (only in frozen exe)
+        if getattr(sys, "frozen", False):
+            QTimer.singleShot(2000, lambda: self._start_update_check(True))  # startup
+            self._update_timer = QTimer(self)
+            self._update_timer.setInterval(_UPDATE_MS)
+            self._update_timer.timeout.connect(self._start_update_check)     # periodic (is_startup=False)
+            self._update_timer.start()
 
     # ── Screen helpers ────────────────────────────────────────────────────────
 
@@ -273,6 +296,15 @@ class BlacksmithWidget(QWidget):
 
         menu.addSeparator()
 
+        if self._pending_update:
+            tag        = self._pending_update["tag"]
+            update_act = QAction(f"🆕  檢測到新版本 {tag}  點我更新！", self)
+            update_act.triggered.connect(self._prompt_and_update)
+        else:
+            update_act = QAction("🔍  檢查更新", self)
+            update_act.triggered.connect(self._check_update_manual)
+        menu.addAction(update_act)
+
         restart_act = QAction("🔄  重啟", self)
         restart_act.triggered.connect(self._restart)
         menu.addAction(restart_act)
@@ -300,6 +332,135 @@ class BlacksmithWidget(QWidget):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+
+    # ── Auto-update ───────────────────────────────────────────────────────────
+
+    def _start_update_check(self, is_startup: bool = False):
+        """Kick off a background version check."""
+        threading.Thread(
+            target=lambda: self._check_update_bg(is_startup),
+            daemon=True,
+        ).start()
+
+    def _check_update_bg(self, is_startup: bool = False):
+        """Background thread: fetch latest release info silently."""
+        import update as upd
+        from config import VERSION
+        info = upd.fetch_latest()
+        if info and upd.is_newer(info["tag"], VERSION):
+            self._update_ready.emit(info["tag"], info["url"], is_startup)
+
+    def _on_update_ready(self, tag: str, url: str, show_toast: bool):
+        """Main thread: store pending update; optionally show toast bubble."""
+        self._pending_update = {"tag": tag, "url": url}
+        if show_toast:
+            self._show_update_toast(tag)
+
+    def _show_update_toast(self, tag: str):
+        """Show a small non-intrusive bubble near the widget."""
+        from ui.toast import ToastWidget
+        from PyQt5.QtWidgets import QApplication
+        toast = ToastWidget(
+            f"🆕 發現新版本 {tag}",
+            "右鍵選單即可更新。",
+        )
+        # Position: above the main widget, right-aligned
+        geo    = self.frameGeometry()
+        screen = QApplication.desktop().availableGeometry(self)
+        toast.adjustSize()
+        tw, th = toast.width(), toast.height()
+        x = max(screen.left(), min(geo.right() - tw,  screen.right()  - tw))
+        y = max(screen.top(),  min(geo.top()  - th - 8, screen.bottom() - th))
+        toast.move(x, y)
+        toast.show()
+
+    def _prompt_and_update(self):
+        """Called when player clicks the 'new version' menu item."""
+        if not self._pending_update:
+            return
+        tag = self._pending_update["tag"]
+        url = self._pending_update["url"]
+        from config import VERSION
+        reply = QMessageBox.question(
+            self, "發現新版本",
+            f"目前版本：{VERSION}\n新版本：{tag}\n\n是否要現在下載並更新？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.Yes:
+            self._do_update(tag, url)
+
+    def _do_update(self, tag: str, url: str):
+        """Start download in background; show a waiting dialog."""
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(
+                self, "更新",
+                "目前以腳本模式執行，無法自動更新。\n請至 GitHub 手動下載最新版本。",
+            )
+            return
+
+        import os
+        import update as upd
+        old_exe = upd.exe_path()
+        new_exe = os.path.join(os.path.dirname(old_exe), "BlacksmithWidget_new.exe")
+        self._update_old_exe = old_exe
+        self._update_new_exe = new_exe
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("更新中")
+        dlg.setWindowFlags(
+            Qt.WindowStaysOnTopHint | Qt.Dialog |
+            Qt.CustomizeWindowHint | Qt.WindowTitleHint
+        )
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(f"正在下載 {tag}，請稍候…"))
+        dlg.setFixedSize(290, 72)
+        self._update_dlg = dlg
+        dlg.show()
+
+        threading.Thread(
+            target=lambda: self._dl_done.emit(upd.download_exe(url, new_exe)),
+            daemon=True,
+        ).start()
+
+    def _on_dl_done(self, success: bool):
+        if self._update_dlg:
+            self._update_dlg.close()
+            self._update_dlg = None
+
+        if success:
+            self._pending_update = None   # update applied — clear flag
+            QMessageBox.information(self, "下載完成", "下載完成！遊戲即將重啟套用更新。")
+            import update as upd
+            upd.launch_updater(self._update_new_exe, self._update_old_exe)
+            self.close()
+        else:
+            QMessageBox.warning(
+                self, "下載失敗",
+                "下載失敗，請稍後再試，或至 GitHub 手動下載最新版本。",
+            )
+
+    def _check_update_manual(self):
+        """Context-menu manual check — if update already found, go straight to prompt."""
+        if self._pending_update:
+            self._prompt_and_update()
+            return
+        def _bg():
+            import update as upd
+            from config import VERSION
+            info = upd.fetch_latest(timeout=8)
+            if info is None:
+                self._check_msg.emit("檢查更新", "無法連線至更新伺服器，請確認網路連線。")
+            elif not upd.is_newer(info["tag"], VERSION):
+                self._check_msg.emit("檢查更新", f"目前已是最新版本（{VERSION}）。")
+            else:
+                # Store pending + tell user the menu button has changed
+                self._update_ready.emit(info["tag"], info["url"], False)
+                self._check_msg.emit(
+                    "發現新版本",
+                    f"找到新版本 {info['tag']}！\n右鍵選單中已出現更新按鈕，點擊即可安裝。",
+                )
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _restart(self):
         """Save state, launch a fresh instance, then close this one."""

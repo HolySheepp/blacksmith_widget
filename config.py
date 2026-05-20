@@ -5,6 +5,8 @@ SCALE is applied only at render time.
 """
 import math
 
+VERSION = "v0.1.0"   # bump this before every release
+
 # ── Display ───────────────────────────────────────────────────────────────────
 WIDGET_W = 480
 WIDGET_H = 360
