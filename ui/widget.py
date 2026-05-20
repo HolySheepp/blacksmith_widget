@@ -7,6 +7,8 @@ BlacksmithWidget — transparent, always-on-top desktop widget.
 - Secret: 5 consecutive left-clicks (each ≤1 s apart) inside the
   horn-tip triangle → Dev Tools dialog.
 """
+import subprocess
+import sys
 import time
 
 from PyQt5.QtWidgets import QWidget, QMenu, QAction
@@ -271,6 +273,10 @@ class BlacksmithWidget(QWidget):
 
         menu.addSeparator()
 
+        restart_act = QAction("🔄  重啟", self)
+        restart_act.triggered.connect(self._restart)
+        menu.addAction(restart_act)
+
         quit_act = QAction("✕  退出", self)
         quit_act.triggered.connect(self.close)
         menu.addAction(quit_act)
@@ -294,6 +300,19 @@ class BlacksmithWidget(QWidget):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+
+    def _restart(self):
+        """Save state, launch a fresh instance, then close this one."""
+        pos = self.pos()
+        self.state.widget_x = pos.x()
+        self.state.widget_y = pos.y()
+        write_save(self.state.to_save())
+        # Launch new instance — works for both .pyw script and frozen .exe
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable])
+        else:
+            subprocess.Popen([sys.executable] + sys.argv)
+        self.close()
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
