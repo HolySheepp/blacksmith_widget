@@ -1,0 +1,5 @@
+PyQt5>=5.15.0
+pynput>=1.7.0
+
+# Dev / packaging only (not needed to run the game)
+pyinstaller>=6.0

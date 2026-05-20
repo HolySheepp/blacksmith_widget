@@ -1,0 +1,343 @@
+"""
+Settings dialog — opened from right-click context menu (⚙ 設定).
+
+Statistics (read-only, auto-refreshes every second):
+  遊玩時長 / 打擊計數 / 力道計數 / 點擊計數
+  Three counters each have a "顯示在鐵砧" checkbox (applies immediately).
+
+Settings:
+  UI大小 slider  → staged, written on "套用UI大小"
+  模式 radio     → applies immediately
+  重置存檔       → confirmation dialog then full reset
+"""
+import sys
+import os
+import winreg
+
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QSlider, QGroupBox, QFormLayout, QFrame,
+    QCheckBox, QRadioButton, QButtonGroup, QMessageBox, QWidget,
+)
+from PyQt5.QtCore import Qt, QTimer
+
+_REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_REG_NAME = "BlacksmithWidget"
+
+
+def _exe_path() -> str:
+    """Return the path of the running executable (works for both .py and .exe)."""
+    if getattr(sys, "frozen", False):
+        return sys.executable          # PyInstaller bundle
+    return os.path.abspath(sys.argv[0])  # running as .py script
+
+
+def _autostart_get() -> bool:
+    """Return True if the autostart registry entry exists and matches current exe."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY) as k:
+            val, _ = winreg.QueryValueEx(k, _REG_NAME)
+            return val.strip('"') == _exe_path()
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def _autostart_set(enable: bool) -> None:
+    """Add or remove the autostart registry entry."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY,
+                            access=winreg.KEY_SET_VALUE) as k:
+            if enable:
+                winreg.SetValueEx(k, _REG_NAME, 0, winreg.REG_SZ,
+                                  f'"{_exe_path()}"')
+            else:
+                try:
+                    winreg.DeleteValue(k, _REG_NAME)
+                except FileNotFoundError:
+                    pass
+    except Exception:
+        pass
+
+_DEF_SCALE = 0.6
+
+
+def _fmt_time(seconds: float) -> str:
+    s = int(seconds)
+    h = s // 3600
+    m = (s % 3600) // 60
+    s = s % 60
+    if h > 0:
+        return f"{h}時{m:02d}分{s:02d}秒"
+    elif m > 0:
+        return f"{m}分{s:02d}秒"
+    else:
+        return f"{s}秒"
+
+
+class SettingsDialog(QDialog):
+
+    def __init__(self, state, parent=None):
+        super().__init__(parent)
+        self.state = state
+        self.setWindowTitle("⚙  設定")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+        self.setMinimumWidth(420)
+        self._build_ui()
+        self._load_from_state()
+
+        # Auto-refresh stats every second
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(1000)
+        self._refresh_timer.timeout.connect(self._refresh_stats)
+        self._refresh_timer.start()
+
+    # ── Build ─────────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.setContentsMargins(12, 12, 12, 12)
+
+        # ── Statistics ────────────────────────────────────────────────────────
+        sg   = QGroupBox("統計資料")
+        sf   = QFormLayout()
+        sf.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        self.playtime_lbl  = QLabel()
+        sf.addRow("遊玩時長:", self.playtime_lbl)
+
+        self.hit_val_lbl   = QLabel()
+        self.force_val_lbl = QLabel()
+        self.click_val_lbl = QLabel()
+        self.show_hit_cb   = QCheckBox()
+        self.show_force_cb = QCheckBox()
+        self.show_click_cb = QCheckBox()
+
+        sf.addRow("打擊計數:", self._stat_row(self.hit_val_lbl,   self.show_hit_cb))
+        sf.addRow("力道計數:", self._stat_row(self.force_val_lbl, self.show_force_cb))
+        sf.addRow("點擊計數:", self._stat_row(self.click_val_lbl, self.show_click_cb))
+
+        # Checkboxes apply immediately
+        self.show_hit_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_hit', v))
+        self.show_force_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_force', v))
+        self.show_click_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_click', v))
+
+        sg.setLayout(sf)
+        root.addWidget(sg)
+
+        # ── Settings ──────────────────────────────────────────────────────────
+        cfg = QGroupBox("設定")
+        cl  = QVBoxLayout()
+        cl.setSpacing(8)
+
+        # UI scale
+        scale_row = QHBoxLayout()
+        scale_row.addWidget(QLabel(f"大小（默認 {int(_DEF_SCALE * 100)}%）:"))
+        self.scale_slider = QSlider(Qt.Horizontal)
+        self.scale_slider.setRange(3, 10)   # 0.3 → 1.0 in 0.1 steps
+        self.scale_slider.setTickInterval(1)
+        self.scale_slider.setTickPosition(QSlider.TicksBelow)
+        self.scale_lbl = QLabel()
+        self.scale_lbl.setMinimumWidth(44)
+        # slider only updates label — state written on Apply
+        self.scale_slider.valueChanged.connect(
+            lambda v: self.scale_lbl.setText(f"{v * 10}%")
+        )
+        scale_row.addWidget(self.scale_slider)
+        scale_row.addWidget(self.scale_lbl)
+        cl.addLayout(scale_row)
+
+        apply_scale_btn = QPushButton("套用大小")
+        apply_scale_btn.clicked.connect(self._apply_scale)
+        cl.addWidget(apply_scale_btn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        cl.addWidget(sep)
+
+        # Autostart
+        auto_row = QHBoxLayout()
+        auto_row.addWidget(QLabel("開機自動啟動:"))
+        self.autostart_cb = QCheckBox()
+        self.autostart_cb.setToolTip("將程式加入 Windows 開機啟動項")
+        self.autostart_cb.toggled.connect(self._on_autostart_changed)
+        auto_row.addWidget(self.autostart_cb)
+        auto_row.addStretch()
+        cl.addLayout(auto_row)
+
+        sep1b = QFrame()
+        sep1b.setFrameShape(QFrame.HLine)
+        sep1b.setFrameShadow(QFrame.Sunken)
+        cl.addWidget(sep1b)
+
+        # Mode selection (applies immediately)
+        cl.addWidget(QLabel("遊戲模式:"))
+        self.charge_radio    = QRadioButton("蓄力模式")
+        self.combo_radio     = QRadioButton("連打模式")
+        self.charge_ex_radio = QRadioButton("蓄力模式 (舊版)")
+        self.turbo_radio     = QRadioButton("渦輪模式 ⚡ (實驗)")
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.addButton(self.charge_radio,    0)
+        self.mode_group.addButton(self.combo_radio,     1)
+        self.mode_group.addButton(self.charge_ex_radio, 2)
+        self.mode_group.addButton(self.turbo_radio,     3)
+        self.mode_group.buttonClicked.connect(self._on_mode_changed)
+
+        mode_row1 = QHBoxLayout()
+        mode_row1.addWidget(self.charge_radio)
+        mode_row1.addWidget(self.combo_radio)
+        mode_row1.addStretch()
+        cl.addLayout(mode_row1)
+
+        mode_row2 = QHBoxLayout()
+        mode_row2.addWidget(self.charge_ex_radio)
+        mode_row2.addWidget(self.turbo_radio)
+        mode_row2.addStretch()
+        cl.addLayout(mode_row2)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
+        sep2.setFrameShadow(QFrame.Sunken)
+        cl.addWidget(sep2)
+
+        # Reset save
+        reset_btn = QPushButton("🗑  重置存檔")
+        reset_btn.setStyleSheet("color: #cc3333; font-weight: bold;")
+        reset_btn.clicked.connect(self._confirm_reset)
+        cl.addWidget(reset_btn)
+
+        cfg.setLayout(cl)
+        root.addWidget(cfg)
+
+        # ── Close ─────────────────────────────────────────────────────────────
+        close_btn = QPushButton("關閉")
+        close_btn.clicked.connect(self.accept)
+        root.addWidget(close_btn)
+
+    @staticmethod
+    def _stat_row(val_lbl: QLabel, cb: QCheckBox) -> QWidget:
+        """Value label + '顯示在鐵砧' text + checkbox, packed in a QWidget."""
+        w   = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(val_lbl, 1)
+        row.addWidget(QLabel("  顯示在鐵砧"))
+        row.addWidget(cb)
+        return w
+
+    # ── Load / refresh ────────────────────────────────────────────────────────
+
+    def _load_from_state(self):
+        s = self.state
+        self._refresh_stats()
+
+        # Block signals to avoid spurious setattr calls on load
+        for cb, attr in [
+            (self.show_hit_cb,   'show_hit'),
+            (self.show_force_cb, 'show_force'),
+            (self.show_click_cb, 'show_click'),
+        ]:
+            cb.blockSignals(True)
+            cb.setChecked(getattr(s, attr))
+            cb.blockSignals(False)
+
+        self.autostart_cb.blockSignals(True)
+        self.autostart_cb.setChecked(self.state.autostart)
+        self.autostart_cb.blockSignals(False)
+
+        scale_int = max(3, min(10, round(s.ui_scale * 10)))
+        self.scale_slider.blockSignals(True)
+        self.scale_slider.setValue(scale_int)
+        self.scale_slider.blockSignals(False)
+        self.scale_lbl.setText(f"{scale_int * 10}%")
+
+        in_fever = s.turbo_mode and s.fever_active
+        if s.turbo_mode:
+            self.turbo_radio.setChecked(True)
+        elif s.kb_mode == "charge_legacy":
+            self.charge_ex_radio.setChecked(True)
+        elif s.kb_mode == "combo":
+            self.combo_radio.setChecked(True)
+        else:
+            self.charge_radio.setChecked(True)
+        for rb in (self.charge_radio, self.combo_radio,
+                   self.charge_ex_radio, self.turbo_radio):
+            rb.setEnabled(not in_fever)
+
+    def _refresh_stats(self):
+        s = self.state
+        self.playtime_lbl.setText(_fmt_time(s.play_time))
+        self.hit_val_lbl.setText(str(s.hit_count))
+        self.force_val_lbl.setText(str(s.force_count))
+        self.click_val_lbl.setText(str(s.click_count))
+
+    # ── Slots ─────────────────────────────────────────────────────────────────
+
+    def _on_autostart_changed(self, enabled: bool):
+        self.state.autostart = enabled
+        _autostart_set(enabled)
+
+    def _apply_scale(self):
+        self.state.ui_scale = self.scale_slider.value() / 10.0
+
+    def _on_mode_changed(self, button):
+        s = self.state
+        if s.turbo_mode and s.fever_active:
+            return   # cannot switch during fever
+
+        if button is self.charge_radio:
+            new_mode, new_turbo = "charge", False
+        elif button is self.combo_radio:
+            new_mode, new_turbo = "combo",  False
+        elif button is self.charge_ex_radio:
+            new_mode, new_turbo = "charge_legacy", False
+        else:  # turbo_radio
+            new_mode, new_turbo = "charge", True
+
+        # Apply turbo toggle if it changed
+        if new_turbo != s.turbo_mode:
+            s.turbo_mode = new_turbo
+            if not s.turbo_mode:
+                if s.fever_active:
+                    s._exit_fever()
+                s.fever_cooldown_timer    = 0.0
+                s.consecutive_full_charge = 0
+
+        if new_mode == s.kb_mode and not (button is self.turbo_radio and not s.turbo_mode):
+            return   # nothing changed
+
+        s.kb_mode             = new_mode
+        s.kb_state            = "idle"
+        s.kb_active           = False
+        s.space_queue         = 0
+        s.typing_pending      = False
+        s.typing_wants_strike = False
+        s.typing_charge       = 0
+        s.typing_cooldown     = 0.0
+        s.charge_pulses.clear()
+        s.charge_ex_armed     = False
+        s.charge_ex_timer     = 0.0
+
+    def _confirm_reset(self):
+        reply = QMessageBox.question(
+            self,
+            "確認重置",
+            "這將清空所有統計資料，並將全部設定恢復為默認值。\n\n確定要重置嗎？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.state.reset_save()
+            self._load_from_state()
+
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+
+    def closeEvent(self, event):
+        self._refresh_timer.stop()
+        super().closeEvent(event)
