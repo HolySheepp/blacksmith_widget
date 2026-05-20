@@ -93,16 +93,33 @@ def exe_path() -> str:
 
 def launch_updater(new_exe: str, old_exe: str) -> None:
     """
-    Write _bsw_updater.bat to %TEMP% (guaranteed ASCII path) and launch it
-    hidden.  The bat waits for the old process to exit, retries the move
-    until it succeeds, then relaunches the exe and deletes itself.
+    Write _bsw_updater.bat to %TEMP% and launch it via ShellExecuteW.
+
+    Root cause of the "Failed to load Python DLL" error on auto-launch:
+      %TEMP% on this machine resolves to the 8.3 short path (FRANCI~1).
+      All processes spawned from our PyInstaller exe inherit a polluted
+      environment (stale _MEI path in PATH, short-form TEMP, etc.).
+      LoadLibrary fails for DLLs extracted to a short-name path in some
+      Windows/AV configurations — even though double-click works fine.
+
+    Fix: use Windows Task Scheduler to launch the new exe.
+      The scheduler service (svchost.exe) creates the process completely
+      outside our chain, with a fresh environment sourced from the user's
+      profile — identical to what Explorer provides on a double-click.
+
     The caller must call self.close() immediately after this.
     """
+    import ctypes
     import tempfile
     bat = os.path.join(tempfile.gettempdir(), "_bsw_updater.bat")
 
     # utf-8-sig (BOM) + chcp 65001 lets cmd.exe handle paths that contain
     # Chinese or other non-ASCII characters.
+    #
+    # The PowerShell one-liner:
+    #   • Registers a one-shot task named _BSW_Update that fires in 4 s.
+    #   • Task Scheduler launches the exe independently of our process tree.
+    #   • The task is auto-deleted 5 min after it expires.
     content = (
         "@echo off\n"
         "chcp 65001 >nul\n"
@@ -113,19 +130,27 @@ def launch_updater(new_exe: str, old_exe: str) -> None:
         "    timeout /t 2 /nobreak >nul\n"
         "    goto retry\n"
         ")\n"
-        # Unblock the downloaded file (removes Zone.Identifier / SmartScreen flag)
+        # Strip Zone.Identifier so SmartScreen won't block the launch
         f'powershell -Command "Unblock-File -LiteralPath \'{old_exe}\'" >nul 2>&1\n'
-        # Use PowerShell Start-Process instead of cmd's "start" so the new exe
-        # inherits a proper long-path environment (avoids FRANCI~1 short-name
-        # issue that breaks PyInstaller's python DLL search at launch time).
-        f'powershell -Command "Start-Process -FilePath \'{old_exe}\'" >nul 2>&1\n'
+        # Create an interactive scheduled task, then fire it immediately with
+        # /run — this bypasses trigger-time scheduling entirely so the exe
+        # launches the moment the bat finishes, not after a polling delay.
+        # /it = "interactive task": runs in the user's active desktop session.
+        # \"...\" inside the outer "" quotes the exe path for schtasks /tr.
+        f'schtasks /create /f /tn "_BSW_Update" /tr "\\"{old_exe}\\"" /sc once /st 00:00 /it >nul 2>&1\n'
+        'schtasks /run /tn "_BSW_Update" >nul 2>&1\n'
         'del "%~f0"\n'
     )
     with open(bat, "w", encoding="utf-8-sig") as f:
         f.write(content)
 
-    subprocess.Popen(
-        ["cmd", "/c", bat],
-        creationflags=subprocess.CREATE_NO_WINDOW,
-        close_fds=True,
-    )
+    # Use ShellExecuteW so the bat itself also has a proper interactive context.
+    # SW_HIDE (0) suppresses the console window.
+    ret = ctypes.windll.shell32.ShellExecuteW(None, "open", bat, None, None, 0)
+    if ret <= 32:
+        # Fallback if ShellExecute is unavailable
+        subprocess.Popen(
+            ["cmd", "/c", bat],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            close_fds=True,
+        )
