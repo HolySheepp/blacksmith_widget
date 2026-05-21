@@ -82,7 +82,23 @@ class BlacksmithWidget(QWidget):
 
         self.listener = KeyboardListener()
         self.listener.key_pressed.connect(self._on_key)
-        self.listener.start()
+        # Root cause of "process exists but no window" on --onefile builds:
+        #   PyInstaller --onefile runs Python in a child process.  On Windows,
+        #   the very FIRST Python-level thread creation (threading.Thread.start)
+        #   in that child process can deadlock before Python's threading
+        #   subsystem is fully initialised.  pynput's Listener.start() happens
+        #   to be that first call, so the app freezes before show() is reached.
+        #
+        # Fix: defer listener startup until AFTER app.exec_() has started.
+        #   Qt initialises its own native threads during event-loop startup,
+        #   which bootstraps Python's threading state and breaks the deadlock.
+        #   QTimer.singleShot(0) fires on the very first event-loop iteration —
+        #   safely after Qt threads are up, but before any user interaction.
+        #   Inside the callback we still spin a daemon thread so that
+        #   pynput's internal _ready.wait() never blocks the main thread.
+        QTimer.singleShot(0, lambda: threading.Thread(
+            target=self._start_listener_safe, daemon=True
+        ).start())
 
         self._timer = QTimer(self)
         self._timer.setInterval(_FRAME_MS)
@@ -126,6 +142,17 @@ class BlacksmithWidget(QWidget):
             self._update_timer.setInterval(_UPDATE_MS)
             self._update_timer.timeout.connect(self._start_update_check)     # periodic (is_startup=False)
             self._update_timer.start()
+
+    # ── Input listener ────────────────────────────────────────────────────────
+
+    def _start_listener_safe(self):
+        """Start pynput listener in a background thread.
+        If the hook installation blocks or fails (AV software, security policy),
+        this silently gives up so the window is always visible."""
+        try:
+            self.listener.start()
+        except Exception:
+            pass
 
     # ── Screen helpers ────────────────────────────────────────────────────────
 
