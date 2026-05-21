@@ -215,6 +215,31 @@ class SettingsDialog(QDialog):
         cfg.setLayout(cl)
         root.addWidget(cfg)
 
+        # ── 視覺效果 ──────────────────────────────────────────────────────────
+        vfx = QGroupBox("視覺效果")
+        vl  = QVBoxLayout()
+        vl.setSpacing(6)
+
+        self.fx_hit_numbers_cb = QCheckBox("打擊數字跳出")
+        self.fx_heat_accum_cb  = QCheckBox("累積餘熱效果")
+
+        self.fx_hit_numbers_cb.setToolTip("打擊時在鐵砧上方顯示浮動數字")
+        self.fx_heat_accum_cb.setToolTip("連續打擊會使鐵砧維持熾熱狀態較久")
+
+        self.fx_hit_numbers_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_hit_numbers', v))
+        self.fx_heat_accum_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_heat_accum', v))
+
+        row_fx1 = QHBoxLayout()
+        row_fx1.addWidget(self.fx_hit_numbers_cb)
+        row_fx1.addWidget(self.fx_heat_accum_cb)
+        row_fx1.addStretch()
+        vl.addLayout(row_fx1)
+
+        vfx.setLayout(vl)
+        root.addWidget(vfx)
+
         # ── Close ─────────────────────────────────────────────────────────────
         close_btn = QPushButton("關閉")
         close_btn.clicked.connect(self.accept)
@@ -242,6 +267,8 @@ class SettingsDialog(QDialog):
             (self.show_hit_cb,   'show_hit'),
             (self.show_force_cb, 'show_force'),
             (self.show_click_cb, 'show_click'),
+            (self.fx_hit_numbers_cb,   'show_hit_numbers'),
+            (self.fx_heat_accum_cb,    'show_heat_accum'),
         ]:
             cb.blockSignals(True)
             cb.setChecked(getattr(s, attr))

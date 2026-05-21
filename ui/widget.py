@@ -7,6 +7,8 @@ BlacksmithWidget — transparent, always-on-top desktop widget.
 - Secret: 5 consecutive left-clicks (each ≤1 s apart) inside the
   horn-tip triangle → Dev Tools dialog.
 """
+import os
+import pathlib
 import subprocess
 import sys
 import threading
@@ -24,6 +26,17 @@ from ui.settings    import SettingsDialog
 from input.listener import KeyboardListener
 from save           import write_save
 from ui.settings    import _autostart_set
+
+def _wlog(msg: str) -> None:
+    """Append one line to the startup log from within the widget (best-effort)."""
+    try:
+        p = (pathlib.Path(os.environ["APPDATA"])
+             / "BlacksmithWidget" / "startup.log")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
 
 _FRAME_MS      = 16
 _AUTOSAVE_MS   = 60_000
@@ -64,8 +77,10 @@ class BlacksmithWidget(QWidget):
     _check_msg    = pyqtSignal(str, str)        # (title, body) info message
 
     def __init__(self):
+        _wlog("[init] super().__init__()")
         super().__init__()
 
+        _wlog("[init] setWindowFlags / setAttribute")
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
@@ -73,13 +88,16 @@ class BlacksmithWidget(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setFixedSize(WIDGET_W, WIDGET_H)
 
+        _wlog("[init] GameState()")
         self.state = GameState()
+        _wlog("[init] autostart_set")
         _autostart_set(self.state.autostart)   # apply saved autostart preference on every launch
 
         # Restore last window position (saved in logical pixels)
         if self.state.widget_x is not None and self.state.widget_y is not None:
             self.move(self.state.widget_x, self.state.widget_y)
 
+        _wlog("[init] KeyboardListener()")
         self.listener = KeyboardListener()
         self.listener.key_pressed.connect(self._on_key)
         # Root cause of "process exists but no window" on --onefile builds:
@@ -96,19 +114,57 @@ class BlacksmithWidget(QWidget):
         #   safely after Qt threads are up, but before any user interaction.
         #   Inside the callback we still spin a daemon thread so that
         #   pynput's internal _ready.wait() never blocks the main thread.
-        QTimer.singleShot(0, lambda: threading.Thread(
-            target=self._start_listener_safe, daemon=True
-        ).start())
+        # ── Force Windows message queue creation before any SetTimer() calls ────
+        # PyInstaller --onefile extracts Qt DLLs to %TEMP%\_MEI...\  On some
+        # machines, Qt's event dispatcher hangs creating its internal
+        # message-only window (CreateWindowEx/SetTimer) because security
+        # software is scanning DLLs in the TEMP path.
+        # Calling PeekMessageW() forces Windows to create the thread's message
+        # queue immediately; subsequent SetTimer() calls post WM_TIMER to that
+        # existing queue and never need CreateWindowEx again.
+        _wlog("[init] PeekMessageW (force message queue)")
+        try:
+            import ctypes
+            import ctypes.wintypes as _wt
+            _msg = _wt.MSG()
+            ctypes.windll.user32.PeekMessageW(
+                ctypes.byref(_msg), None, 0, 0, 0)   # PM_NOREMOVE = 0
+            _wlog("[init] PeekMessageW OK")
+        except Exception as _e:
+            _wlog(f"[init] PeekMessageW failed (non-fatal): {_e}")
 
+        # ── Timers — created here but NOT started yet ─────────────────────────
+        # Root cause of the hang at _timer.start():
+        #   QTimer.start() calls QEventDispatcherWin32::registerTimer(), which on
+        #   its first call invokes createInternalHwnd() → CreateWindowExW(HWND_MESSAGE).
+        #   On machines with security software scanning %TEMP%\_MEI..., that
+        #   CreateWindowEx call blocks for tens of seconds.
+        # Fix: defer ALL SetTimer()-based starts to _start_timers(), which fires
+        #   via singleShot(0) on the FIRST event-loop iteration — AFTER exec()
+        #   has already called processEvents() → createInternalHwnd() itself.
+        #   By then the internal HWND exists; SetTimer() just posts a WM_TIMER to
+        #   the existing queue and returns instantly.
+        _wlog("[init] frame/save timers (configured, start deferred)")
         self._timer = QTimer(self)
         self._timer.setInterval(_FRAME_MS)
         self._timer.timeout.connect(self._tick)
-        self._timer.start()
 
         self._save_timer = QTimer(self)
         self._save_timer.setInterval(_AUTOSAVE_MS)
         self._save_timer.timeout.connect(self._autosave)
-        self._save_timer.start()
+
+        # Prepare update timer (frozen exe only) — NOT started yet
+        if getattr(sys, "frozen", False):
+            self._update_timer = QTimer(self)
+            self._update_timer.setInterval(_UPDATE_MS)
+            self._update_timer.timeout.connect(self._start_update_check)
+
+        # singleShot(0) uses QMetaObject::invokeMethod(QueuedConnection) — NOT
+        # SetTimer — so it fires on the very first event-loop iteration without
+        # any Win32 timer machinery.  _start_timers() then calls .start() on all
+        # timers safely, after createInternalHwnd() is guaranteed to exist.
+        _wlog("[init] QTimer.singleShot(0) — all starts deferred to _start_timers()")
+        QTimer.singleShot(0, self._start_timers)
 
         # Drag state
         self._press_global: QPoint | None = None
@@ -127,23 +183,43 @@ class BlacksmithWidget(QWidget):
         self._update_dlg:     QDialog | None  = None
         self._update_new_exe: str             = ""
         self._update_old_exe: str             = ""
-        self._pending_update: dict | None     = None   # {"tag":…,"url":…} when update found
-        self._update_toast:   object          = None   # keep reference so GC doesn't kill it
-        self._update_dlg_lbl: object          = None   # QLabel inside download dialog
-        self._countdown_timer: QTimer | None  = None   # fires every 1 s during restart countdown
-        self._countdown_n:    int             = 0      # seconds remaining
+        self._pending_update: dict | None     = None
+        self._update_toast:   object          = None
+        self._update_dlg_lbl: object          = None
+        self._countdown_timer: QTimer | None  = None
+        self._countdown_n:    int             = 0
+        _wlog("[init] instance vars done")
+        _wlog("[init] signal connections")
         self._update_ready.connect(self._on_update_ready)
         self._dl_done.connect(self._on_dl_done)
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
-        # Start update checks (only in frozen exe)
-        if getattr(sys, "frozen", False):
-            QTimer.singleShot(2000, lambda: self._start_update_check(True))  # startup
-            self._update_timer = QTimer(self)
-            self._update_timer.setInterval(_UPDATE_MS)
-            self._update_timer.timeout.connect(self._start_update_check)     # periodic (is_startup=False)
-            self._update_timer.start()
+        _wlog("[init] __init__ complete")
 
     # ── Input listener ────────────────────────────────────────────────────────
+
+    def _start_timers(self):
+        """Called via singleShot(0) — fires on the first event-loop iteration.
+        By this point QEventDispatcherWin32.processEvents() has already called
+        createInternalHwnd(), so all subsequent SetTimer() calls post to an
+        existing HWND and return instantly without ever blocking."""
+        _wlog("[timers] _start_timers — createInternalHwnd guaranteed, starting timers")
+        self._timer.start()
+        _wlog("[timers] _timer started")
+        self._save_timer.start()
+        _wlog("[timers] _save_timer started")
+        # Listener: spin up in a daemon thread so pynput's _ready.wait() never
+        # blocks the main thread.
+        threading.Thread(target=self._start_listener_safe, daemon=True).start()
+        _wlog("[timers] listener thread dispatched")
+        # Frozen-exe only: schedule an update check 2 s after startup, plus
+        # a periodic hourly check.
+        if getattr(sys, "frozen", False):
+            QTimer.singleShot(2000, lambda: self._start_update_check(True))
+            _wlog("[timers] update check scheduled (2 s)")
+            if hasattr(self, "_update_timer"):
+                self._update_timer.start()
+                _wlog("[timers] _update_timer started")
+        _wlog("[timers] _start_timers complete")
 
     def _start_listener_safe(self):
         """Start pynput listener in a background thread.
@@ -151,8 +227,9 @@ class BlacksmithWidget(QWidget):
         this silently gives up so the window is always visible."""
         try:
             self.listener.start()
-        except Exception:
-            pass
+            _wlog("[listener] listener started OK")
+        except Exception as exc:
+            _wlog(f"[listener] listener FAILED: {exc}")
 
     # ── Screen helpers ────────────────────────────────────────────────────────
 

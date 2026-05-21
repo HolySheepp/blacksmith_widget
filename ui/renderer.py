@@ -76,6 +76,8 @@ _FONT_MODE    = QFont("Consolas", 10)
 _FONT_FEVER   = QFont("Arial", 26)
 _FONT_FEVER.setBold(True)
 _FONT_STAR    = QFont("Consolas", 13)
+_FONT_HIT_NUM = QFont("Arial", 18)
+_FONT_HIT_NUM.setBold(True)
 
 # ── Pre-cached QBrush objects for fixed-color fills ───────────────────────────
 
@@ -153,6 +155,7 @@ def draw_frame(painter: QPainter, state: GameState):
     _draw_sparks(painter, state)
     _draw_hammer(painter, state, cos_a, sin_a)
     _draw_flash(painter, state)
+    _draw_hit_numbers(painter, state)
     _draw_hud(painter, state)
 
     painter.restore()
@@ -161,7 +164,12 @@ def draw_frame(painter: QPainter, state: GameState):
 # ── Anvil ─────────────────────────────────────────────────────────────────────
 
 def _draw_anvil(painter: QPainter, state: GameState):
-    glow = state.anvil_glow
+    # Feature 4: heat gives the glow a minimum floor so it fades slowly with heat.
+    # Once heat_level reaches 0 the floor is 0 too — anvil fully cools.
+    if state.show_heat_accum and state.heat_level > 0:
+        glow = max(state.anvil_glow, state.heat_level * 0.22)
+    else:
+        glow = state.anvil_glow
 
     painter.setPen(Qt.NoPen)
 
@@ -183,8 +191,13 @@ def _draw_anvil(painter: QPainter, state: GameState):
     painter.setBrush(_BR_CA_BODY)
     painter.drawRect(QRectF(FACE_L, FACE_TOP + 10, FACE_R - FACE_L, 122))
 
-    # Striking face surface (color varies with glow)
-    painter.setBrush(QBrush(QColor(int(70 + glow * 140), int(70 + glow * 50), 70)))
+    # Striking face surface — blends from dark grey toward the last strike colour
+    sr, sg, sb = state.strike_color
+    painter.setBrush(QBrush(QColor(
+        int(70 + glow * (sr - 70)),
+        int(70 + glow * (sg - 70)),
+        int(70 + glow * (sb - 70)),
+    )))
     painter.drawRect(QRectF(FACE_L, FACE_TOP, FACE_R - FACE_L, 12))
 
     # Face edge highlight
@@ -375,12 +388,39 @@ def _draw_flash(painter: QPainter, state: GameState):
     if sf < 0.004:
         return
     spread = 60 * sf
+    sr, sg, sb = state.strike_color
     painter.setPen(Qt.NoPen)
-    painter.setBrush(QBrush(QColor(255, 255, 220, int(sf * 200))))
+    painter.setBrush(QBrush(QColor(sr, sg, sb, int(sf * 200))))
     painter.drawRect(QRectF(
         FACE_L - spread, FACE_TOP - spread * 0.5,
         (FACE_R - FACE_L) + spread * 2, 18 + spread,
     ))
+
+
+# ── Hit number popups (Feature 2) ────────────────────────────────────────────
+
+def _draw_hit_numbers(painter: QPainter, state: GameState):
+    """Draw floating "+N" numbers that rise from the anvil face after each hit."""
+    if not state.show_hit_numbers or not state.hit_numbers:
+        return
+    painter.setFont(_FONT_HIT_NUM)
+    fm = painter.fontMetrics()
+    for hn in state.hit_numbers:
+        t     = hn["age"] / hn["max_age"]            # 0 → 1
+        alpha = int((1.0 - t ** 1.6) * 255)
+        if alpha < 4:
+            continue
+        text = f"+{hn['value']}"
+        r, g, b = hn["color"]
+        tx = hn["x"] - fm.horizontalAdvance(text) / 2
+        ty = hn["y"]
+        # Shadow
+        painter.setPen(QPen(QColor(0, 0, 0, min(255, alpha))))
+        for ox, oy in _SHADOW_OFS:
+            painter.drawText(QPointF(tx + ox, ty + oy), text)
+        # Text
+        painter.setPen(QPen(QColor(r, g, b, alpha)))
+        painter.drawText(QPointF(tx, ty), text)
 
 
 # ── HUD ───────────────────────────────────────────────────────────────────────

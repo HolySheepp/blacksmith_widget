@@ -20,6 +20,7 @@ from config import (
     TYPING_BASE_MS, TYPING_MAX_CHARGE,
     FEVER_THRESHOLD, FEVER_DURATION, FEVER_COOLDOWN,
     CHARGE_EX_LIFT, CHARGE_EX_IDLE_MS,
+    get_charge_color,
 )
 
 KX = 90
@@ -70,6 +71,7 @@ class GameState:
         # Visual
         self.strike_flash: float = 0.0
         self.anvil_glow:   float = 0.0
+        self.strike_color: tuple = (210, 120, 70)   # RGB of last strike (hammer colour)
         self.sparks: list[Spark] = []
 
         # ── Keyboard / input state machine ─────────────────────────────────
@@ -109,6 +111,16 @@ class GameState:
         self.show_click:     bool  = bool(_sv.get("show_click",      True))
         self.show_charge_bar: bool = bool(_sv.get("show_charge_bar", False))
         self.autostart:       bool = bool(_sv.get("autostart",       True))
+
+        # ── Visual effects (saved) ─────────────────────────────────────────────
+        self.show_hit_numbers:   bool = bool(_sv.get("show_hit_numbers",   True))
+        self.show_heat_accum:    bool = bool(_sv.get("show_heat_accum",    True))
+
+        # Hit number popups (transient)
+        self.hit_numbers: list = []
+
+        # Heat accumulation (transient): increases on hit, decays slowly
+        self.heat_level: float = 0.0
 
         # Widget position (logical pixels).  None = let Qt decide on first launch.
         _wx = _sv.get("widget_x")
@@ -183,7 +195,26 @@ class GameState:
         if self.hit_cooldown    > 0: self.hit_cooldown    = max(0.0, self.hit_cooldown    - delta_ms)
         if self.typing_cooldown > 0: self.typing_cooldown = max(0.0, self.typing_cooldown - delta_ms)
         if self.strike_flash    > 0: self.strike_flash    = max(0.0, self.strike_flash    - dt * 5.0)
-        if self.anvil_glow      > 0: self.anvil_glow      = max(0.0, self.anvil_glow      - dt * 4.0)
+
+        # Feature 4: heat accumulation slows the glow decay rate
+        if self.anvil_glow > 0:
+            _glow_decay = 4.0
+            if self.show_heat_accum and self.heat_level > 0:
+                _glow_decay *= max(0.15, 1.0 - self.heat_level * 0.75)
+            self.anvil_glow = max(0.0, self.anvil_glow - dt * _glow_decay)
+        if self.heat_level > 0:
+            self.heat_level = max(0.0, self.heat_level - dt * 0.20)
+
+        # Feature 2: hit number popup lifetime / drift
+        if self.hit_numbers:
+            _alive_hn = []
+            for _hn in self.hit_numbers:
+                _hn["age"] += dt
+                _hn["y"]   -= dt * 45.0
+                if _hn["age"] < _hn["max_age"]:
+                    _alive_hn.append(_hn)
+            self.hit_numbers = _alive_hn
+
 
         # ── Charge auto-slam timers (lift mode) ───────────────────────────
         # Two independent triggers: hard-cap window OR inactivity gap.
@@ -292,6 +323,8 @@ class GameState:
             "charge_ex_lift":          self.charge_ex_lift,
             "widget_x":                self.widget_x,
             "widget_y":                self.widget_y,
+            "show_hit_numbers":        self.show_hit_numbers,
+            "show_heat_accum":         self.show_heat_accum,
         }
 
     def reset_save(self):
@@ -339,7 +372,13 @@ class GameState:
         # Visuals
         self.strike_flash = 0.0
         self.anvil_glow   = 0.0
+        self.strike_color = (210, 120, 70)
         self.sparks.clear()
+        # Visual effects toggles
+        self.show_hit_numbers   = True
+        self.show_heat_accum    = True
+        self.hit_numbers        = []
+        self.heat_level         = 0.0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -482,6 +521,10 @@ class GameState:
         return float(KB_X), float(KB_Y)
 
     def _on_hit(self, hit_x: float):
+        # Pre-compute charge for feature 2 popup (before typing_charge is reset below)
+        _charge_n_popup = (max(1, self.typing_charge)
+                           if self.kb_mode in ("charge", "charge_legacy") else 1)
+
         f = int(min(max(self.vel_y, 0), 2000))
         self.last_force   = f
         self.has_hit      = True
@@ -525,6 +568,27 @@ class GameState:
             (0.06 + intensity * 0.38) * min(2.0, charge_mult * 0.6 + 0.4))
         self.anvil_glow   = min(1.0,
             (0.5  + intensity * 0.5)  * min(1.6, charge_mult * 0.4 + 0.6))
+        # Snapshot the hammer colour at the moment of impact so the anvil
+        # glow and strike flash use the same hue as the hammer head.
+        if self.kb_mode in ("charge", "charge_legacy"):
+            self.strike_color = get_charge_color(cf)   # cf computed just above
+        else:
+            self.strike_color = (210, 120, 70)         # default amber (combo mode)
+
+        # Feature 2: floating hit number popup
+        if self.show_hit_numbers:
+            self.hit_numbers.append({
+                "value":   _charge_n_popup,
+                "x":       hit_x,
+                "y":       float(FACE_TOP - 8),
+                "age":     0.0,
+                "max_age": 0.80,
+                "color":   self.strike_color,
+            })
+
+        # Feature 4: heat accumulation — raise heat level on each hit
+        if self.show_heat_accum:
+            self.heat_level = min(1.0, self.heat_level + 0.20)
 
         self.vcvy = -(50 + intensity * 380)
         self.vcvx = 0.0
