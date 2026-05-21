@@ -14,9 +14,10 @@ import sys
 import threading
 import time
 
-from PyQt5.QtWidgets import QWidget, QMenu, QAction, QDialog, QVBoxLayout, QLabel, QMessageBox, QProgressBar
+from PyQt5.QtWidgets import (QWidget, QMenu, QAction, QDialog, QVBoxLayout,
+                              QLabel, QMessageBox, QProgressBar, QSystemTrayIcon)
 from PyQt5.QtCore    import Qt, QTimer, QPoint, pyqtSlot, pyqtSignal
-from PyQt5.QtGui     import QPainter
+from PyQt5.QtGui     import QPainter, QIcon, QPixmap
 
 from config         import WIDGET_W, WIDGET_H
 from game.state     import GameState
@@ -163,6 +164,8 @@ class BlacksmithWidget(QWidget):
         # SetTimer — so it fires on the very first event-loop iteration without
         # any Win32 timer machinery.  _start_timers() then calls .start() on all
         # timers safely, after createInternalHwnd() is guaranteed to exist.
+        self.setMouseTracking(True)   # needed for hover detection (enterEvent alone isn't enough during drags)
+
         _wlog("[init] QTimer.singleShot(0) — all starts deferred to _start_timers()")
         QTimer.singleShot(0, self._start_timers)
 
@@ -171,6 +174,15 @@ class BlacksmithWidget(QWidget):
         self._drag_offset:  QPoint | None = None
         self._is_dragging:  bool          = False
 
+        # Ghost guide hide delay — leaveEvent starts this; enterEvent cancels it.
+        # Fires after 1 s to clear mouse_on_widget so the guide fades out.
+        self._ghost_hide_timer = QTimer(self)
+        self._ghost_hide_timer.setSingleShot(True)
+        self._ghost_hide_timer.setInterval(400)
+        self._ghost_hide_timer.timeout.connect(
+            lambda: setattr(self.state, "mouse_on_widget", False)
+        )
+
         # Dev Tools trigger
         self._dt_clicks: int   = 0
         self._dt_last_t: float = 0.0
@@ -178,6 +190,9 @@ class BlacksmithWidget(QWidget):
 
         # Settings dialog
         self._settings_dialog: SettingsDialog | None = None
+
+        # System tray icon
+        self._tray: QSystemTrayIcon | None = None
 
         # Auto-update state
         self._update_dlg:     QDialog | None  = None
@@ -193,6 +208,8 @@ class BlacksmithWidget(QWidget):
         self._update_ready.connect(self._on_update_ready)
         self._dl_done.connect(self._on_dl_done)
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
+        _wlog("[init] tray icon")
+        self._setup_tray()
         _wlog("[init] __init__ complete")
 
     # ── Input listener ────────────────────────────────────────────────────────
@@ -288,13 +305,17 @@ class BlacksmithWidget(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self._press_global = event.globalPos()
-            self._drag_offset  = event.globalPos() - self.frameGeometry().topLeft()
-            self._is_dragging  = False
+            if not self.state.lock_position:
+                self._press_global = event.globalPos()
+                self._drag_offset  = event.globalPos() - self.frameGeometry().topLeft()
+                self._is_dragging  = False
         elif event.button() == Qt.RightButton:
             self._show_context_menu(event.globalPos())
 
     def mouseMoveEvent(self, event):
+        # Always update hover state (mouse tracking enabled)
+        self.state.mouse_on_widget = True
+        # Drag
         if not (event.buttons() & Qt.LeftButton) or self._press_global is None:
             return
         delta = event.globalPos() - self._press_global
@@ -311,6 +332,16 @@ class BlacksmithWidget(QWidget):
             self._is_dragging  = False
             self._press_global = None
             self._drag_offset  = None
+
+    def enterEvent(self, event):
+        self._ghost_hide_timer.stop()   # cancel any pending fade-out
+        self.state.mouse_on_widget = True
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        # Don't hide immediately — give the player 1 s to reach the ghost circle.
+        self._ghost_hide_timer.start()
+        super().leaveEvent(event)
 
     # ── Dev Tools trigger ─────────────────────────────────────────────────────
 
@@ -363,7 +394,7 @@ class BlacksmithWidget(QWidget):
             self._settings_dialog.raise_()
             self._settings_dialog.activateWindow()
             return
-        dlg = SettingsDialog(self.state, self)
+        dlg = SettingsDialog(self.state, self, center_cb=self._move_to_center)
         self._settings_dialog = dlg
         self._place_dialog(dlg)
 
@@ -373,35 +404,50 @@ class BlacksmithWidget(QWidget):
         menu = QMenu(self)
         s = self.state
 
-        in_fever    = s.turbo_mode and s.fever_active
-        in_special  = s.turbo_mode or s.kb_mode == "charge_legacy"
-        if in_fever:
-            mode_label = "🔥  Fever 進行中（無法切換）"
-        elif s.turbo_mode:
-            mode_label = "⚡  渦輪模式（請從設定切換）"
-        elif s.kb_mode == "charge_legacy":
-            mode_label = "🔨  蓄力(舊版)模式（請從設定切換）"
-        elif s.kb_mode == "charge":
-            mode_label = "⚡  切換為連打模式"
-        else:
-            mode_label = "🔥  切換為蓄力模式"
+        in_fever = s.turbo_mode and s.fever_active
 
-        toggle = QAction(mode_label, self)
-        toggle.triggered.connect(self._toggle_mode)
-        toggle.setEnabled(not in_fever and not in_special)
-        menu.addAction(toggle)
+        # ── Charge / combo toggle (hidden while turbo is active) ──────────
+        if not s.turbo_mode:
+            if s.kb_mode == "charge_legacy":
+                toggle = QAction("🔨  蓄力(舊版)模式", self)
+                toggle.setEnabled(False)
+            elif s.kb_mode == "charge":
+                toggle = QAction("⚡  切換為連打模式", self)
+                toggle.triggered.connect(self._toggle_mode)
+            else:
+                toggle = QAction("🔥  切換為蓄力模式", self)
+                toggle.triggered.connect(self._toggle_mode)
+            menu.addAction(toggle)
+
+        # ── Turbo toggle ──────────────────────────────────────────────────
+        if in_fever:
+            turbo_act = QAction("🔥  Fever 進行中（無法切換）", self)
+            turbo_act.setEnabled(False)
+        elif s.turbo_mode:
+            turbo_act = QAction("⚡  關閉渦輪模式", self)
+            turbo_act.triggered.connect(self._toggle_turbo)
+        else:
+            turbo_act = QAction("⚡  開啟渦輪模式 (實驗性)", self)
+            turbo_act.triggered.connect(self._toggle_turbo)
+        menu.addAction(turbo_act)
+
+        menu.addSeparator()
+
+        # ── Hide anvil toggle ─────────────────────────────────────────────
+        hide_act = QAction("👁  顯示鐵砧" if s.hide_anvil else "🫥  隱藏鐵砧", self)
+        hide_act.triggered.connect(self._toggle_hide_anvil)
+        menu.addAction(hide_act)
+
+        # ── Lock position toggle ──────────────────────────────────────────
+        lock_act = QAction("🔓  解除鎖定位置" if s.lock_position else "🔒  鎖定位置", self)
+        lock_act.triggered.connect(self._toggle_lock_position)
+        menu.addAction(lock_act)
 
         menu.addSeparator()
 
         settings_act = QAction("⚙  設定", self)
         settings_act.triggered.connect(self._open_settings)
         menu.addAction(settings_act)
-
-        menu.addSeparator()
-
-        center_act = QAction("📌  移回螢幕中央", self)
-        center_act.triggered.connect(self._move_to_center)
-        menu.addAction(center_act)
 
         menu.addSeparator()
 
@@ -441,6 +487,33 @@ class BlacksmithWidget(QWidget):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+
+    def _toggle_turbo(self):
+        s = self.state
+        if s.turbo_mode and s.fever_active:
+            return   # cannot switch during fever
+        s.turbo_mode = not s.turbo_mode
+        if not s.turbo_mode:
+            if s.fever_active:
+                s._exit_fever()
+            s.fever_cooldown_timer    = 0.0
+            s.consecutive_full_charge = 0
+        s.kb_state            = "idle"
+        s.kb_active           = False
+        s.space_queue         = 0
+        s.typing_pending      = False
+        s.typing_wants_strike = False
+        s.typing_charge       = 0
+        s.typing_cooldown     = 0.0
+        s.charge_pulses.clear()
+        s.charge_ex_armed     = False
+        s.charge_ex_timer     = 0.0
+
+    def _toggle_hide_anvil(self):
+        self.state.hide_anvil = not self.state.hide_anvil
+
+    def _toggle_lock_position(self):
+        self.state.lock_position = not self.state.lock_position
 
     # ── Auto-update ───────────────────────────────────────────────────────────
 
@@ -651,11 +724,95 @@ class BlacksmithWidget(QWidget):
             subprocess.Popen([sys.executable] + sys.argv)
         self.close()
 
+    # ── System tray ───────────────────────────────────────────────────────────
+
+    def _setup_tray(self):
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            _wlog("[tray] system tray not available — skipping")
+            return
+        self._tray = QSystemTrayIcon(QIcon(self._make_tray_pixmap()), self)
+        self._tray.setToolTip("鐵匠鋪小工具")
+
+        menu = QMenu()
+
+        s_act = QAction("⚙  設定", menu)
+        s_act.triggered.connect(self._open_settings)
+        menu.addAction(s_act)
+
+        c_act = QAction("📌  移回螢幕中央", menu)
+        c_act.triggered.connect(self._move_to_center)
+        menu.addAction(c_act)
+
+        menu.addSeparator()
+
+        r_act = QAction("🔄  重啟", menu)
+        r_act.triggered.connect(self._restart)
+        menu.addAction(r_act)
+
+        q_act = QAction("✕  退出", menu)
+        q_act.triggered.connect(self.close)
+        menu.addAction(q_act)
+
+        self._tray.setContextMenu(menu)
+        self._tray.activated.connect(self._on_tray_activated)
+        self._tray.show()
+        _wlog("[tray] shown")
+
+    def _make_tray_pixmap(self) -> QPixmap:
+        """Draw a 32×32 anvil icon programmatically — no external image needed."""
+        from PyQt5.QtGui import QPainter as _P, QColor as _C, QBrush as _B
+        from PyQt5.QtGui import QPen as _Pen, QPolygonF as _Poly
+        from PyQt5.QtCore import QPointF as _Pt, QRectF as _R
+
+        px = QPixmap(32, 32)
+        px.fill(_C(0, 0, 0, 0))
+        p = _P(px)
+        p.setRenderHint(_P.Antialiasing)
+
+        # Dark forge-brown background
+        p.setPen(Qt.NoPen)
+        p.setBrush(_B(_C(42, 30, 18, 240)))
+        p.drawRoundedRect(_R(0, 0, 32, 32), 7, 7)
+
+        # Anvil top face (trapezoid)
+        p.setBrush(_B(_C(175, 175, 175)))
+        face = _Poly([_Pt(4, 10), _Pt(24, 10), _Pt(22, 16), _Pt(6, 16)])
+        p.drawPolygon(face)
+
+        # Horn
+        p.setBrush(_B(_C(145, 145, 145)))
+        horn = _Poly([_Pt(24, 10), _Pt(29, 12), _Pt(24, 15)])
+        p.drawPolygon(horn)
+
+        # Waist / neck
+        p.setBrush(_B(_C(105, 105, 105)))
+        p.drawRect(_R(11, 16, 9, 4))
+
+        # Base
+        p.setBrush(_B(_C(140, 140, 140)))
+        p.drawRoundedRect(_R(7, 20, 17, 6), 2, 2)
+
+        # Highlight on top face edge
+        p.setPen(_Pen(_C(215, 215, 215, 200), 1))
+        p.drawLine(_Pt(5, 10), _Pt(23, 10))
+
+        p.end()
+        return px
+
+    def _on_tray_activated(self, reason):
+        """Double-click on tray icon raises the widget to the front."""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
         self._save_timer.stop()
         self._timer.stop()
+        if self._tray is not None:
+            self._tray.hide()
         pos = self.pos()
         self.state.widget_x = pos.x()
         self.state.widget_y = pos.y()

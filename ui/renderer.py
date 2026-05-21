@@ -109,6 +109,24 @@ _PEN_TEXT_SHADOW = QPen(_CHUD_SHADOW)
 _PEN_WEAR        = QPen(_CA_WEAR)
 _PEN_WEAR.setWidthF(1)
 
+# ── Anvil ghost guide (shown when hide_anvil + mouse on widget) ───────────────
+
+def _make_ghost_pens():
+    lp = QPen(QColor(210, 70, 20, 210))     # orange-red dashed line — visible on light bg
+    lp.setWidthF(1.5)
+    lp.setStyle(Qt.DashLine)
+    cp = QPen(QColor(140, 200, 255, 200))   # sky-blue dashed circle
+    cp.setWidthF(2.0)
+    cp.setStyle(Qt.DashLine)
+    xp = QPen(QColor(140, 200, 255, 180))   # crosshair inside circle
+    xp.setWidthF(1.5)
+    return lp, cp, xp
+
+_GH_LINE_PEN, _GH_CIRC_PEN, _GH_CROSS_PEN = _make_ghost_pens()
+_GH_DOT_BRUSH = QBrush(QColor(140, 200, 255, 220))
+_GH_CIRC_R    = 22.0   # drag-handle circle radius (game units)
+_GH_CROSS_LEN = 9.0    # crosshair arm length (game units)
+
 # ── Pre-built static anvil geometry (never changes) ───────────────────────────
 
 _POLY_HORN1 = QPolygonF([
@@ -151,12 +169,17 @@ def draw_frame(painter: QPainter, state: GameState):
     cos_a = math.cos(a)
     sin_a = math.sin(a)
 
-    _draw_anvil(painter, state)
+    if not state.hide_anvil:
+        _draw_anvil(painter, state)
     _draw_sparks(painter, state)
     _draw_hammer(painter, state, cos_a, sin_a)
-    _draw_flash(painter, state)
+    if not state.hide_anvil:
+        _draw_flash(painter, state)
+        _draw_hud(painter, state)
+    else:
+        if state.mouse_on_widget and not state.lock_position:
+            _draw_anvil_ghost(painter, state)
     _draw_hit_numbers(painter, state)
-    _draw_hud(painter, state)
 
     painter.restore()
 
@@ -522,3 +545,48 @@ def _draw_hud(painter: QPainter, state: GameState):
         tw_cc = painter.fontMetrics().horizontalAdvance(cc_text)
         painter.setPen(QPen(_CHUD_STAR))
         painter.drawText(QPointF(AX - tw_cc / 2, FACE_TOP - 12), cc_text)
+
+
+# ── Anvil ghost guide ─────────────────────────────────────────────────────────
+
+def _draw_anvil_ghost(painter: QPainter, state: GameState):
+    """Drawn when hide_anvil=True and the mouse is on the widget.
+    Shows a dashed horizontal line at the anvil face level and a dashed
+    drag-handle circle at the strike point so the user can reposition the widget."""
+    # ── Invisible hit area ────────────────────────────────────────────────
+    # Windows per-pixel hit testing routes clicks ONLY to pixels with alpha > 0.
+    # The ghost guide sits on a fully transparent background, so without this
+    # rect the circle would never receive mouse events.  alpha=2 is invisible.
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(QColor(0, 0, 0, 2)))
+    painter.drawRect(QRectF(
+        FACE_L - 55,
+        FACE_TOP - _GH_CIRC_R - 6,
+        FACE_R - FACE_L + 110,
+        _GH_CIRC_R * 2 + 12,
+    ))
+
+    # ── Horizontal face line ──────────────────────────────────────────────
+    painter.setPen(_GH_LINE_PEN)
+    painter.drawLine(QPointF(FACE_L - 50, FACE_TOP), QPointF(FACE_R + 50, FACE_TOP))
+
+    # ── Drag-handle circle at strike point (AX, FACE_TOP) ────────────────
+    painter.setPen(_GH_CIRC_PEN)
+    painter.setBrush(Qt.NoBrush)
+    painter.drawEllipse(QPointF(AX, FACE_TOP), _GH_CIRC_R, _GH_CIRC_R)
+
+    # ── Crosshair inside circle ───────────────────────────────────────────
+    painter.setPen(_GH_CROSS_PEN)
+    painter.drawLine(
+        QPointF(AX - _GH_CROSS_LEN, FACE_TOP),
+        QPointF(AX + _GH_CROSS_LEN, FACE_TOP),
+    )
+    painter.drawLine(
+        QPointF(AX, FACE_TOP - _GH_CROSS_LEN),
+        QPointF(AX, FACE_TOP + _GH_CROSS_LEN),
+    )
+
+    # ── Centre dot ───────────────────────────────────────────────────────
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(_GH_DOT_BRUSH)
+    painter.drawEllipse(QPointF(AX, FACE_TOP), 3.0, 3.0)

@@ -78,9 +78,10 @@ def _fmt_time(seconds: float) -> str:
 
 class SettingsDialog(QDialog):
 
-    def __init__(self, state, parent=None):
+    def __init__(self, state, parent=None, center_cb=None):
         super().__init__(parent)
-        self.state = state
+        self.state     = state
+        self._center_cb = center_cb
         self.setWindowTitle("⚙  設定")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
         self.setMinimumWidth(420)
@@ -205,6 +206,12 @@ class SettingsDialog(QDialog):
         sep2.setFrameShape(QFrame.HLine)
         sep2.setFrameShadow(QFrame.Sunken)
         cl.addWidget(sep2)
+
+        # Center widget
+        if self._center_cb is not None:
+            center_btn = QPushButton("📌  移回螢幕中央")
+            center_btn.clicked.connect(self._center_cb)
+            cl.addWidget(center_btn)
 
         # Reset save
         reset_btn = QPushButton("🗑  重置存檔")

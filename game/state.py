@@ -141,6 +141,13 @@ class GameState:
         self.fever_duration: float          = float(_sv.get("fever_duration", FEVER_DURATION))
         self.fever_cooldown_duration: float = float(_sv.get("fever_cooldown_duration", FEVER_COOLDOWN))
 
+        # ── Anvil visibility ───────────────────────────────────────────────
+        self.hide_anvil:      bool = bool(_sv.get("hide_anvil",      False))
+        self.lock_position:   bool = bool(_sv.get("lock_position",   False))
+
+        # Transient hover state (set by widget, not saved)
+        self.mouse_on_widget: bool = False
+
     # ─────────────────────────────────────────────────────────────────────────
     # Geometry (exact port from JS)
     # ─────────────────────────────────────────────────────────────────────────
@@ -325,6 +332,8 @@ class GameState:
             "widget_y":                self.widget_y,
             "show_hit_numbers":        self.show_hit_numbers,
             "show_heat_accum":         self.show_heat_accum,
+            "hide_anvil":              self.hide_anvil,
+            "lock_position":           self.lock_position,
         }
 
     def reset_save(self):
@@ -379,6 +388,9 @@ class GameState:
         self.show_heat_accum    = True
         self.hit_numbers        = []
         self.heat_level         = 0.0
+        self.hide_anvil         = False
+        self.lock_position      = False
+        self.mouse_on_widget    = False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
