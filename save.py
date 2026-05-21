@@ -1,5 +1,5 @@
 """
-Persistent save/load — stored in %APPDATA%\BlacksmithWidget\save.json
+Persistent save/load — stored in %APPDATA%\\BlacksmithWidget\\save.json
 (like most games on Windows).
 Falls back to the exe/script directory if AppData is unavailable.
 """
