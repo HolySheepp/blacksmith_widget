@@ -71,6 +71,9 @@ class BlacksmithWidget(QWidget):
         self.state = GameState()
         _wlog("[init] autostart_set")
         _autostart_set(self.state.autostart)   # apply saved autostart preference on every launch
+        # Apply saved always-on-top preference before first show() — no visible flicker
+        if not self.state.always_on_top:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
 
         # Restore last window position (saved in logical pixels)
         if self.state.widget_x is not None and self.state.widget_y is not None:
@@ -364,6 +367,15 @@ class BlacksmithWidget(QWidget):
         self._dt_dialog = dlg
         self._place_dialog(dlg)
 
+    def _apply_always_on_top(self, enabled: bool):
+        """Apply the always-on-top window flag and re-show.  Called by settings checkbox
+        and by _toggle_always_on_top.  Does NOT update state — caller is responsible."""
+        if enabled:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        else:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
+        self.show()   # required after setWindowFlags to make the change take effect
+
     def _open_settings(self):
         if self._settings_dialog is not None and self._settings_dialog.isVisible():
             self._settings_dialog.raise_()
@@ -371,7 +383,8 @@ class BlacksmithWidget(QWidget):
             return
         dlg = SettingsDialog(self.state, self,
                              center_cb=self._move_to_center,
-                             devtools_cb=self._open_devtools)
+                             devtools_cb=self._open_devtools,
+                             always_on_top_cb=self._apply_always_on_top)
         self._settings_dialog = dlg
         self._place_dialog(dlg)
 
@@ -419,6 +432,11 @@ class BlacksmithWidget(QWidget):
         lock_act = QAction("🔓  解除鎖定位置" if s.lock_position else "🔒  鎖定位置", self)
         lock_act.triggered.connect(self._toggle_lock_position)
         menu.addAction(lock_act)
+
+        # ── Always-on-top toggle ──────────────────────────────────────────
+        top_act = QAction("🔝  取消永遠置頂" if s.always_on_top else "🔝  永遠置頂", self)
+        top_act.triggered.connect(self._toggle_always_on_top)
+        menu.addAction(top_act)
 
         menu.addSeparator()
 
@@ -495,6 +513,10 @@ class BlacksmithWidget(QWidget):
 
     def _toggle_lock_position(self):
         self.state.lock_position = not self.state.lock_position
+
+    def _toggle_always_on_top(self):
+        self.state.always_on_top = not self.state.always_on_top
+        self._apply_always_on_top(self.state.always_on_top)
 
     # ── Auto-update ───────────────────────────────────────────────────────────
 
@@ -723,6 +745,13 @@ class BlacksmithWidget(QWidget):
         c_act = QAction("📌  移回螢幕中央", menu)
         c_act.triggered.connect(self._move_to_center)
         menu.addAction(c_act)
+
+        top_act = QAction(
+            "🔝  取消永遠置頂" if self.state.always_on_top else "🔝  永遠置頂",
+            menu,
+        )
+        top_act.triggered.connect(self._toggle_always_on_top)
+        menu.addAction(top_act)
 
         menu.addSeparator()
 
