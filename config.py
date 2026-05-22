@@ -5,7 +5,7 @@ SCALE is applied only at render time.
 """
 import math
 
-VERSION = "v0.1.6"   # bump this before every release
+VERSION = "v0.1.7"   # bump this before every release
 
 # ── Display ───────────────────────────────────────────────────────────────────
 WIDGET_W = 480
@@ -44,7 +44,9 @@ KB_Y    = 232               # ready hover height
 MAX_VCY = FACE_TOP - HEAD_PERP  # 300 — hard floor
 
 # ── Spring physics ────────────────────────────────────────────────────────────
-KY = 120
+KX = 90     # horizontal spring constant
+DX = 12     # horizontal damping
+KY = 120    # vertical spring constant
 DY = round(7 * math.sqrt(KY / 60) * 10) / 10   # ≈ 9.9
 
 # ── Typing mode defaults ──────────────────────────────────────────────────────

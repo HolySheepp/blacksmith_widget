@@ -16,16 +16,13 @@ from config import (
     IDLE_ANGLE, SWING_ANGLE,
     HEAD_OFFSET, HEAD_THICK, HEAD_PERP,
     HL, HR, HP,
+    KX, DX,
     KY, DY,
     TYPING_BASE_MS, TYPING_MAX_CHARGE,
     FEVER_THRESHOLD, FEVER_DURATION, FEVER_COOLDOWN,
     CHARGE_EX_LIFT, CHARGE_EX_IDLE_MS,
     get_charge_color,
 )
-
-KX = 90
-DX = 12
-
 
 class Spark:
     __slots__ = ("x", "y", "vx", "vy", "life", "max_life", "size", "color")
@@ -77,6 +74,11 @@ class GameState:
         # ── Keyboard / input state machine ─────────────────────────────────
         self.kb_active: bool = False
         self.kb_mode: str    = _sv.get("kb_mode", "combo")   # "combo" | "charge" | "charge_ex"
+        # Sanitise: turbo mode's base is always "charge"; "combo" only appears
+        # during fever.  If we exited mid-fever the save has turbo_mode=True +
+        # kb_mode="combo" — correct it so we don't resume in a free-combo state.
+        if self.turbo_mode and self.kb_mode == "combo":
+            self.kb_mode = "charge"
         self.kb_state: str   = "idle"     # "idle" | "strike" | "wait"
 
         # Combo mode: queued strikes
@@ -110,7 +112,7 @@ class GameState:
         self.show_force:     bool  = bool(_sv.get("show_force",      False))
         self.show_click:     bool  = bool(_sv.get("show_click",      True))
         self.show_charge_bar: bool = bool(_sv.get("show_charge_bar", False))
-        self.autostart:       bool = bool(_sv.get("autostart",       True))
+        self.autostart:       bool = bool(_sv.get("autostart",       False))
 
         # ── Visual effects (saved) ─────────────────────────────────────────────
         self.show_hit_numbers:   bool = bool(_sv.get("show_hit_numbers",   True))
@@ -165,16 +167,6 @@ class GameState:
         hy = self.vcy + HEAD_OFFSET * sin_a - HEAD_PERP * cos_a
         return hx, hy
 
-    def render_vcy(self) -> float:
-        a     = self.hammer_angle()
-        sin_a = math.sin(a)
-        cos_a = math.cos(a)
-        face_y = self.vcy + HEAD_OFFSET * sin_a - HEAD_PERP * cos_a
-        face_x = self.vcx + HEAD_OFFSET * cos_a + HEAD_PERP * sin_a
-        if face_y > FACE_TOP and FACE_L - 20 <= face_x <= FACE_R + 20:
-            return FACE_TOP - HEAD_OFFSET * sin_a + HEAD_PERP * cos_a
-        return self.vcy
-
     # ─────────────────────────────────────────────────────────────────────────
     # Public API
     # ─────────────────────────────────────────────────────────────────────────
@@ -203,7 +195,7 @@ class GameState:
         if self.typing_cooldown > 0: self.typing_cooldown = max(0.0, self.typing_cooldown - delta_ms)
         if self.strike_flash    > 0: self.strike_flash    = max(0.0, self.strike_flash    - dt * 5.0)
 
-        # Feature 4: heat accumulation slows the glow decay rate
+        # Heat accumulation slows the glow decay rate
         if self.anvil_glow > 0:
             _glow_decay = 4.0
             if self.show_heat_accum and self.heat_level > 0:
@@ -212,7 +204,7 @@ class GameState:
         if self.heat_level > 0:
             self.heat_level = max(0.0, self.heat_level - dt * 0.20)
 
-        # Feature 2: hit number popup lifetime / drift
+        # Hit number popups: advance age and drift upward
         if self.hit_numbers:
             _alive_hn = []
             for _hn in self.hit_numbers:
@@ -221,7 +213,6 @@ class GameState:
                 if _hn["age"] < _hn["max_age"]:
                     _alive_hn.append(_hn)
             self.hit_numbers = _alive_hn
-
 
         # ── Charge auto-slam timers (lift mode) ───────────────────────────
         # Two independent triggers: hard-cap window OR inactivity gap.
@@ -315,7 +306,7 @@ class GameState:
             "force_count":             self.force_count,
             "click_count":             self.click_count,
             "play_time":               self.play_time,
-            "kb_mode":                 self.kb_mode,
+            "kb_mode":                 "charge" if self.turbo_mode else self.kb_mode,
             "ui_scale":                self.ui_scale,
             "show_hit":                self.show_hit,
             "show_force":              self.show_force,
@@ -338,7 +329,6 @@ class GameState:
 
     def reset_save(self):
         """Clear all statistics and restore every setting to its default."""
-        from config import TYPING_MAX_CHARGE, FEVER_THRESHOLD, FEVER_DURATION, FEVER_COOLDOWN
         # Statistics
         self.hit_count   = 0
         self.force_count = 0
@@ -375,7 +365,7 @@ class GameState:
         self.show_force      = False
         self.show_click      = True
         self.show_charge_bar = False
-        self.autostart       = True
+        self.autostart       = False
         self.widget_x        = None
         self.widget_y        = None
         # Visuals
@@ -420,9 +410,6 @@ class GameState:
             self.kb_state  = "idle"
             self._kb_start_mx = self.mx
             self._kb_start_my = self.my
-
-        if self.kb_mode != "charge_legacy":
-            return
 
         state = self.kb_state
         if state == "idle":
@@ -560,7 +547,7 @@ class GameState:
             self.force_count += charge_n
 
             # ── Turbo mode: track consecutive full-charge hits ─────────────
-            if (self.turbo_mode and self.kb_mode in ("charge", "charge_legacy")
+            if (self.turbo_mode
                     and not self.fever_active and self.fever_cooldown_timer <= 0):
                 if charge_n >= self.typing_max_charge:
                     self.consecutive_full_charge += 1
@@ -572,22 +559,17 @@ class GameState:
             self.typing_charge   = 0
             self.charge_ex_armed = False  # reset EX timer state after each hit
             self.charge_ex_timer = 0.0
+            self.strike_color    = get_charge_color(cf)
         else:
             # Combo mode: each hit = +1 force (no charge system)
-            self.force_count += 1
+            self.force_count  += 1
+            self.strike_color  = (210, 120, 70)   # default amber
 
         self.strike_flash = min(0.95,
             (0.06 + intensity * 0.38) * min(2.0, charge_mult * 0.6 + 0.4))
         self.anvil_glow   = min(1.0,
             (0.5  + intensity * 0.5)  * min(1.6, charge_mult * 0.4 + 0.6))
-        # Snapshot the hammer colour at the moment of impact so the anvil
-        # glow and strike flash use the same hue as the hammer head.
-        if self.kb_mode in ("charge", "charge_legacy"):
-            self.strike_color = get_charge_color(cf)   # cf computed just above
-        else:
-            self.strike_color = (210, 120, 70)         # default amber (combo mode)
-
-        # Feature 2: floating hit number popup
+        # Floating hit number popup
         if self.show_hit_numbers:
             self.hit_numbers.append({
                 "value":   _charge_n_popup,
@@ -598,7 +580,7 @@ class GameState:
                 "color":   self.strike_color,
             })
 
-        # Feature 4: heat accumulation — raise heat level on each hit
+        # Heat accumulation — raise heat level on each hit
         if self.show_heat_accum:
             self.heat_level = min(1.0, self.heat_level + 0.20)
 

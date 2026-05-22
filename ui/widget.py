@@ -208,6 +208,24 @@ class BlacksmithWidget(QWidget):
         self._update_ready.connect(self._on_update_ready)
         self._dl_done.connect(self._on_dl_done)
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
+
+        # ── Pre-create native HWND ─────────────────────────────────────────────
+        # Qt uses lazy HWND creation: the native window is created on the first
+        # call to show() / winId() / raise_().  On machines where security
+        # software intercepts CreateWindowExW via a CBT hook (e.g. scanning
+        # DLLs in %TEMP%\_MEI...), this can block for 10–30 s during show().
+        # Calling winId() HERE forces HWND creation immediately, INSIDE __init__,
+        # while the event loop is not yet running.  The CBT hook still fires, but
+        # now it fires during widget construction (expected), not during show(),
+        # and subsequent show() calls just map the existing HWND — no second
+        # CreateWindowExW — so show() returns instantly.
+        _wlog("[init] winId() — pre-creating native HWND")
+        try:
+            _hwnd = int(self.winId())
+            _wlog(f"[init] HWND pre-created: {_hwnd:#010x}")
+        except Exception as _e:
+            _wlog(f"[init] winId() failed (non-fatal): {_e}")
+
         _wlog("[init] tray icon")
         self._setup_tray()
         _wlog("[init] __init__ complete")

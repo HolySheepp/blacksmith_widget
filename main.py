@@ -7,6 +7,12 @@ Usage:
 
 Right-click the widget to toggle mode or quit.
 Left-click-drag to reposition.
+
+Emergency rescue flag (run from a command prompt):
+    BlacksmithWidget.exe --remove-autostart
+Removes the Windows autostart registry entry and exits immediately.
+Use this if the game is stuck at startup and the machine reboots into it
+repeatedly, preventing you from deleting the exe.
 """
 import os
 import sys
@@ -35,7 +41,40 @@ def _slog(msg: str) -> None:
         pass
 
 
+def _remove_autostart() -> None:
+    """Remove the Windows autostart registry entry and exit.
+    Called when the user passes --remove-autostart on the command line.
+    This is a rescue path: it must not import Qt or start a GUI."""
+    import winreg
+    _REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    _REG_NAME = "BlacksmithWidget"
+    removed = False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY,
+                            access=winreg.KEY_SET_VALUE) as k:
+            try:
+                winreg.DeleteValue(k, _REG_NAME)
+                removed = True
+            except FileNotFoundError:
+                pass  # already gone
+    except Exception as e:
+        print(f"[remove-autostart] registry error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if removed:
+        print("[remove-autostart] Autostart entry removed successfully.")
+    else:
+        print("[remove-autostart] No autostart entry found (already removed).")
+    sys.exit(0)
+
+
 def main():
+    # ── Emergency rescue: --remove-autostart ──────────────────────────────────
+    # Must be checked BEFORE any Qt import or GUI code runs, so that even a
+    # machine where the game hangs on startup can be rescued from the command line.
+    if "--remove-autostart" in sys.argv:
+        _remove_autostart()
+
     # Must be set BEFORE QApplication is created.
     # Normalises all coordinates to logical pixels so geometry and fonts
     # both scale with DPR; prevents the "anvil tiny / text huge" mismatch
@@ -71,6 +110,7 @@ def main():
     _slog("[startup] BlacksmithWidget()")
     widget = BlacksmithWidget()
     _slog("[startup] BlacksmithWidget init OK")
+    _slog("[startup] widget.show() — mapping HWND to screen")
     widget.show()
     _slog("[startup] widget.show() OK")
 

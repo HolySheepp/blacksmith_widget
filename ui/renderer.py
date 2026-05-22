@@ -366,7 +366,8 @@ def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float
 
 
 def _render_vcy_fast(state: GameState, cos_a: float, sin_a: float) -> float:
-    """Like state.render_vcy() but reuses already-computed cos_a / sin_a."""
+    """Clamp vcy so the hammer face doesn't visually penetrate the anvil.
+    Reuses already-computed cos_a / sin_a from draw_frame — avoids redundant trig."""
     face_y = state.vcy + HEAD_OFFSET * sin_a - HEAD_PERP * cos_a
     face_x = state.vcx + HEAD_OFFSET * cos_a + HEAD_PERP * sin_a
     if face_y > FACE_TOP and FACE_L - 20 <= face_x <= FACE_R + 20:
