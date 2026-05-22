@@ -74,11 +74,6 @@ class GameState:
         # ── Keyboard / input state machine ─────────────────────────────────
         self.kb_active: bool = False
         self.kb_mode: str    = _sv.get("kb_mode", "combo")   # "combo" | "charge" | "charge_ex"
-        # Sanitise: turbo mode's base is always "charge"; "combo" only appears
-        # during fever.  If we exited mid-fever the save has turbo_mode=True +
-        # kb_mode="combo" — correct it so we don't resume in a free-combo state.
-        if self.turbo_mode and self.kb_mode == "combo":
-            self.kb_mode = "charge"
         self.kb_state: str   = "idle"     # "idle" | "strike" | "wait"
 
         # Combo mode: queued strikes
@@ -135,6 +130,11 @@ class GameState:
 
         # ── Turbo / Fever mode (loaded from save) ──────────────────────────
         self.turbo_mode: bool               = bool(_sv.get("turbo_mode", False))
+        # Sanitise: turbo mode's base is always "charge"; "combo" only appears
+        # during fever.  If we exited mid-fever the save has turbo_mode=True +
+        # kb_mode="combo" — correct it so we don't resume in a free-combo state.
+        if self.turbo_mode and self.kb_mode == "combo":
+            self.kb_mode = "charge"
         self.fever_active: bool             = False
         self.fever_timer: float             = 0.0   # seconds remaining in fever
         self.fever_cooldown_timer: float    = 0.0   # cooldown seconds remaining
@@ -143,9 +143,10 @@ class GameState:
         self.fever_duration: float          = float(_sv.get("fever_duration", FEVER_DURATION))
         self.fever_cooldown_duration: float = float(_sv.get("fever_cooldown_duration", FEVER_COOLDOWN))
 
-        # ── Anvil visibility ───────────────────────────────────────────────
+        # ── Anvil visibility / style ───────────────────────────────────────
         self.hide_anvil:      bool = bool(_sv.get("hide_anvil",      False))
         self.lock_position:   bool = bool(_sv.get("lock_position",   False))
+        self.anvil_v2:        bool = bool(_sv.get("anvil_v2",        True))
 
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
@@ -325,6 +326,7 @@ class GameState:
             "show_heat_accum":         self.show_heat_accum,
             "hide_anvil":              self.hide_anvil,
             "lock_position":           self.lock_position,
+            "anvil_v2":                self.anvil_v2,
         }
 
     def reset_save(self):
@@ -380,6 +382,7 @@ class GameState:
         self.heat_level         = 0.0
         self.hide_anvil         = False
         self.lock_position      = False
+        self.anvil_v2           = True
         self.mouse_on_widget    = False
 
     # ─────────────────────────────────────────────────────────────────────────

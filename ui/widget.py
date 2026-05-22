@@ -44,29 +44,7 @@ _AUTOSAVE_MS   = 60_000
 _DRAG_THRESH2  = 25
 _UPDATE_MS     = 3_600_000   # hourly update check interval (ms)
 
-# ── Dev Tools trigger triangle ────────────────────────────────────────────────
-# User specified widget-space vertices at scale=0.5:
-#   A=(255,172)  B=(255,192)  C=(285,181)
-# Converting to game-space (÷0.5) so the zone scales with ui_scale:
-_DT_GAME = [(510, 344), (510, 384), (570, 362)]
-_DT_CLICKS_NEEDED = 5
-_DT_INTERVAL_SEC  = 1.0
-
-
-def _in_dt_zone(px: float, py: float, scale: float) -> bool:
-    """Point-in-triangle test; triangle vertices scale with ui_scale."""
-    verts = [(gx * scale, gy * scale) for gx, gy in _DT_GAME]
-    (ax, ay), (bx, by), (cx, cy) = verts
-
-    def cross(p1x, p1y, p2x, p2y):
-        return (p2x - p1x) * (py - p1y) - (p2y - p1y) * (px - p1x)
-
-    d1 = cross(ax, ay, bx, by)
-    d2 = cross(bx, by, cx, cy)
-    d3 = cross(cx, cy, ax, ay)
-    has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
-    has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
-    return not (has_neg and has_pos)
+# Dev Tools are now accessed via the hidden passphrase input in Settings dialog.
 
 
 class BlacksmithWidget(QWidget):
@@ -183,9 +161,7 @@ class BlacksmithWidget(QWidget):
             lambda: setattr(self.state, "mouse_on_widget", False)
         )
 
-        # Dev Tools trigger
-        self._dt_clicks: int   = 0
-        self._dt_last_t: float = 0.0
+        # Dev Tools dialog (opened via Settings passphrase)
         self._dt_dialog: DevToolsDialog | None = None
 
         # Settings dialog
@@ -345,8 +321,6 @@ class BlacksmithWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if not self._is_dragging:
-                self._check_dt_trigger(event.pos())
             self._is_dragging  = False
             self._press_global = None
             self._drag_offset  = None
@@ -360,23 +334,6 @@ class BlacksmithWidget(QWidget):
         # Don't hide immediately — give the player 1 s to reach the ghost circle.
         self._ghost_hide_timer.start()
         super().leaveEvent(event)
-
-    # ── Dev Tools trigger ─────────────────────────────────────────────────────
-
-    def _check_dt_trigger(self, pos):
-        x, y = pos.x(), pos.y()
-        if _in_dt_zone(x, y, self.state.ui_scale):
-            now = time.monotonic()
-            if now - self._dt_last_t > _DT_INTERVAL_SEC:
-                self._dt_clicks = 1
-            else:
-                self._dt_clicks += 1
-            self._dt_last_t = now
-            if self._dt_clicks >= _DT_CLICKS_NEEDED:
-                self._dt_clicks = 0
-                self._open_devtools()
-        else:
-            self._dt_clicks = 0
 
     def _place_dialog(self, dlg):
         """Show dlg next to the widget, guaranteed fully on screen.
@@ -412,7 +369,9 @@ class BlacksmithWidget(QWidget):
             self._settings_dialog.raise_()
             self._settings_dialog.activateWindow()
             return
-        dlg = SettingsDialog(self.state, self, center_cb=self._move_to_center)
+        dlg = SettingsDialog(self.state, self,
+                             center_cb=self._move_to_center,
+                             devtools_cb=self._open_devtools)
         self._settings_dialog = dlg
         self._place_dialog(dlg)
 
@@ -516,6 +475,10 @@ class BlacksmithWidget(QWidget):
                 s._exit_fever()
             s.fever_cooldown_timer    = 0.0
             s.consecutive_full_charge = 0
+        else:
+            # Turbo just enabled — combo is incompatible; fall back to charge
+            if s.kb_mode == "combo":
+                s.kb_mode = "charge"
         s.kb_state            = "idle"
         s.kb_active           = False
         s.space_queue         = 0

@@ -29,7 +29,7 @@ from game.state import GameState
 
 # ── Pre-cached QColor constants (avoid per-frame allocation) ──────────────────
 
-# Anvil
+# Anvil (classic style)
 _CA_SHADOW  = QColor(0,   0,   0,   128)
 _CA_BASE    = QColor(33,  33,  33)
 _CA_BASE2   = QColor(44,  44,  44)
@@ -41,6 +41,16 @@ _CA_HORN2   = QColor(45,  45,  45)
 _CA_HOLE    = QColor(8,   8,   8)
 _CA_WEAR    = QColor(80,  80,  80,  102)
 _CA_BEVEL   = QColor(56,  56,  56)
+
+# Anvil v2 (icon style — lighter, sculptural silhouette)
+_CA_V2_BODY  = QColor(92,  92,  95)    # face body trapezoid
+_CA_V2_WAIST = QColor(60,  60,  62)    # narrow waist column (darkest — adds depth)
+_CA_V2_BASE  = QColor(108, 108, 111)   # base platform
+_CA_V2_HORN  = QColor(75,  75,  78)    # horn outer face
+_CA_V2_HORN2 = QColor(100, 100, 102)   # horn inner highlight
+_CA_V2_EDGE  = QColor(198, 198, 200)   # bright top-edge highlight
+# V2 face surface base tint (blends toward strike_color on glow)
+_V2_FACE_BASE = (148, 148, 151)
 
 # Hammer
 _CH_WOOD    = QColor(107, 58,  31)
@@ -71,8 +81,8 @@ _CHUD_BARBOR = QColor(80,  80,  80)
 
 # ── Pre-cached QFont objects ──────────────────────────────────────────────────
 
-_FONT_COUNTER = QFont("Consolas", 14)
-_FONT_MODE    = QFont("Consolas", 10)
+_FONT_COUNTER = QFont("Segoe UI", 15)
+_FONT_MODE    = QFont("Segoe UI", 17)
 _FONT_FEVER   = QFont("Arial", 26)
 _FONT_FEVER.setBold(True)
 _FONT_STAR    = QFont("Consolas", 13)
@@ -91,6 +101,14 @@ _BR_CA_HORN1   = QBrush(_CA_HORN1)
 _BR_CA_HORN2   = QBrush(_CA_HORN2)
 _BR_CA_HOLE    = QBrush(_CA_HOLE)
 _BR_CA_BEVEL   = QBrush(_CA_BEVEL)
+
+# V2 brushes
+_BR_V2_BODY  = QBrush(_CA_V2_BODY)
+_BR_V2_WAIST = QBrush(_CA_V2_WAIST)
+_BR_V2_BASE  = QBrush(_CA_V2_BASE)
+_BR_V2_HORN  = QBrush(_CA_V2_HORN)
+_BR_V2_HORN2 = QBrush(_CA_V2_HORN2)
+_BR_V2_EDGE  = QBrush(_CA_V2_EDGE)
 _BR_CH_WOOD    = QBrush(_CH_WOOD)
 _BR_CH_GRAIN   = QBrush(_CH_GRAIN)
 _BR_CH_GRIP    = QBrush(_CH_GRIP)
@@ -140,6 +158,36 @@ _POLY_HORN2 = QPolygonF([
     QPointF(FACE_R + 72, FACE_TOP + 30),
 ])
 
+# ── V2 anvil geometry ─────────────────────────────────────────────────────────
+_V2_FACE_BW     = 15               # left-side taper (px)
+_V2_FACE_SHIFT  = 15               # face body shifted rightward (px)
+_V2_FACE_R_EXP  = 55               # right side expands from waist-right upward by this (px)
+_V2_FACE_BOT_Y  = FACE_TOP + 57    # 387 — face body bottom / waist top  (height = 45 px)
+_V2_WAIST_HW    = 65               # waist half-width  (130 px wide)
+_V2_WAIST_BOT_Y = _V2_FACE_BOT_Y + 32  # 419 — waist bottom / base top  (height = 32 px)
+_V2_BASE_HW     = 90               # base half-width   (180 px wide)
+_V2_BASE_H      = 38               # base height       (38 px)
+_V2_BASE_BOT_Y  = _V2_WAIST_BOT_Y + _V2_BASE_H  # 470 — base bottom (for shadow)
+
+# Face body corners — set directly by user
+_V2_TL_X = 293   # top-left  x
+_V2_TR_X = 508   # top-right x
+_V2_BR_X = 468   # bot-right x
+_V2_BL_X = 308   # bot-left  x
+_V2_BASE_SHIFT = 8   # base shifted right (px)
+
+_POLY_V2_FACE_BODY = QPolygonF([
+    QPointF(_V2_TL_X, FACE_TOP + 12),   # 293, 342
+    QPointF(_V2_TR_X, FACE_TOP + 12),   # 516, 342
+    QPointF(_V2_BR_X, _V2_FACE_BOT_Y),  # 470, 387
+    QPointF(_V2_BL_X, _V2_FACE_BOT_Y),  # 310, 387
+])
+
+# V2 HUD text Y anchors (text baseline, centred vertically in each zone)
+_V2_HUD_HIT_Y   = int((FACE_TOP + 12 + _V2_FACE_BOT_Y)   / 2) + 7   # face body ≈ 371
+_V2_HUD_FORCE_Y = int((_V2_FACE_BOT_Y + _V2_WAIST_BOT_Y) / 2) + 7   # waist      ≈ 410
+_V2_HUD_CLICK_Y = int((_V2_WAIST_BOT_Y + _V2_BASE_BOT_Y) / 2) + 7   # base       ≈ 445
+
 # Wear mark line pairs
 _WEAR_LINES = [
     (QPointF(FACE_L + 10 + i * 28,      FACE_TOP + 1),
@@ -169,8 +217,15 @@ def draw_frame(painter: QPainter, state: GameState):
     cos_a = math.cos(a)
     sin_a = math.sin(a)
 
+    # Fever / cooldown / star text — drawn first so anvil renders on top
     if not state.hide_anvil:
-        _draw_anvil(painter, state)
+        _draw_turbo_overlay(painter, state)
+
+    if not state.hide_anvil:
+        if getattr(state, 'anvil_v2', True):
+            _draw_anvil_v2(painter, state)
+        else:
+            _draw_anvil(painter, state)
     _draw_sparks(painter, state)
     _draw_hammer(painter, state, cos_a, sin_a)
     if not state.hide_anvil:
@@ -254,6 +309,71 @@ def _draw_anvil(painter: QPainter, state: GameState):
         painter.drawRect(QRectF(FACE_L, FACE_TOP, FACE_R - FACE_L, 12))
         painter.setBrush(QBrush(QColor(255, 255, 255, int(glow * 0.12 * 255))))
         painter.drawRect(QRectF(FACE_L, FACE_TOP, FACE_R - FACE_L, 12))
+
+
+# ── Anvil v2 (icon style) ─────────────────────────────────────────────────────
+
+def _draw_anvil_v2(painter: QPainter, state: GameState):
+    """Icon-inspired anvil: trapezoidal face body, defined waist, rounded base.
+    Striking surface stays at FACE_TOP (same as v1) — hammer alignment unchanged."""
+    if state.show_heat_accum and state.heat_level > 0:
+        glow = max(state.anvil_glow, state.heat_level * 0.22)
+    else:
+        glow = state.anvil_glow
+
+    painter.setPen(Qt.NoPen)
+
+    # Base (rounded corners, fixed height, shifted right)
+    _bx = AX - _V2_BASE_HW + _V2_BASE_SHIFT
+    painter.setBrush(_BR_V2_BASE)
+    painter.drawRoundedRect(
+        QRectF(_bx, _V2_WAIST_BOT_Y, _V2_BASE_HW * 2 - 8, _V2_BASE_H),
+        10, 10,
+    )
+    # Base top-edge strip (lighter band for depth)
+    painter.setBrush(_BR_CA_BASE2)
+    painter.drawRoundedRect(
+        QRectF(_bx + 5, _V2_WAIST_BOT_Y - 3, (_V2_BASE_HW - 5) * 2 - 8, 8),
+        4, 4,
+    )
+
+    # Waist column (darkest part — visual depth between face and base)
+    painter.setBrush(_BR_V2_WAIST)
+    painter.drawRect(QRectF(
+        AX - _V2_WAIST_HW, _V2_FACE_BOT_Y,
+        _V2_WAIST_HW * 2,  _V2_WAIST_BOT_Y - _V2_FACE_BOT_Y,
+    ))
+
+    # Face body (trapezoid: wide at face, tapers to waist width)
+    painter.setBrush(_BR_V2_BODY)
+    painter.drawPolygon(_POLY_V2_FACE_BODY)
+
+    # Striking face surface — blends from v2 base tint toward last strike colour
+    fr, fg, fb = _V2_FACE_BASE
+    sr, sg, sb = state.strike_color
+    painter.setBrush(QBrush(QColor(
+        int(fr + glow * (sr - fr)),
+        int(fg + glow * (sg - fg)),
+        int(fb + glow * (sb - fb)),
+    )))
+    painter.drawRect(QRectF(_V2_TL_X, FACE_TOP, _V2_TR_X - _V2_TL_X, 12))
+
+    # Top-edge highlight (bright strip)
+    painter.setBrush(_BR_V2_EDGE)
+    painter.drawRect(QRectF(_V2_TL_X + 2, FACE_TOP, _V2_TR_X - _V2_TL_X - 4, 3))
+
+    # Wear marks
+    painter.setPen(_PEN_WEAR)
+    for p1, p2 in _WEAR_LINES:
+        painter.drawLine(p1, p2)
+
+    # Glow overlay
+    painter.setPen(Qt.NoPen)
+    if glow > 0.01:
+        painter.setBrush(QBrush(QColor(255, 153, 0,   int(glow * 0.45 * 255))))
+        painter.drawRect(QRectF(_V2_TL_X, FACE_TOP, _V2_TR_X - _V2_TL_X, 12))
+        painter.setBrush(QBrush(QColor(255, 255, 255, int(glow * 0.12 * 255))))
+        painter.drawRect(QRectF(_V2_TL_X, FACE_TOP, _V2_TR_X - _V2_TL_X, 12))
 
 
 # ── Hammer ────────────────────────────────────────────────────────────────────
@@ -451,27 +571,46 @@ def _draw_hit_numbers(painter: QPainter, state: GameState):
 
 def _draw_hud(painter: QPainter, state: GameState):
     # ── Counter lines ─────────────────────────────────────────────────────
-    _all = [
-        (state.show_hit,   f"⚒ 打擊  {state.hit_count}",   362, _CHUD_HIT),
-        (state.show_force, f"◈ 力道  {state.force_count}",  390, _CHUD_FORCE),
-        (state.show_click, f"✦ 點擊  {state.click_count}",  418, _CHUD_CLICK),
-    ]
-    lines = [(text, y, col) for show, text, y, col in _all if show]
-
-    if lines:
+    if getattr(state, 'anvil_v2', True):
+        # V2: each counter sits inside its own anvil zone, symbol + number only
+        _v2_ctrs = [
+            (state.show_hit,   f"⚒ {state.hit_count}",   _V2_HUD_HIT_Y,   _CHUD_HIT),
+            (state.show_force, f"◈ {state.force_count}",  _V2_HUD_FORCE_Y, _CHUD_FORCE),
+            (state.show_click, f"✦ {state.click_count}",  _V2_HUD_CLICK_Y, _CHUD_CLICK),
+        ]
         painter.setFont(_FONT_COUNTER)
         fm = painter.fontMetrics()
-        for text, game_y, col in lines:
+        for show, text, game_y, col in _v2_ctrs:
+            if not show:
+                continue
             tx = AX - fm.horizontalAdvance(text) / 2
             painter.setPen(_PEN_TEXT_SHADOW)
             for ox, oy in _SHADOW_OFS:
                 painter.drawText(QPointF(tx + ox, game_y + oy), text)
             painter.setPen(QPen(col))
             painter.drawText(QPointF(tx, game_y), text)
+    else:
+        # V1: classic stacked layout with labels
+        _all = [
+            (state.show_hit,   f"⚒ 打擊  {state.hit_count}",   362, _CHUD_HIT),
+            (state.show_force, f"◈ 力道  {state.force_count}",  390, _CHUD_FORCE),
+            (state.show_click, f"✦ 點擊  {state.click_count}",  418, _CHUD_CLICK),
+        ]
+        lines = [(text, y, col) for show, text, y, col in _all if show]
+        if lines:
+            painter.setFont(_FONT_COUNTER)
+            fm = painter.fontMetrics()
+            for text, game_y, col in lines:
+                tx = AX - fm.horizontalAdvance(text) / 2
+                painter.setPen(_PEN_TEXT_SHADOW)
+                for ox, oy in _SHADOW_OFS:
+                    painter.drawText(QPointF(tx + ox, game_y + oy), text)
+                painter.setPen(QPen(col))
+                painter.drawText(QPointF(tx, game_y), text)
 
     # ── Mode indicator ────────────────────────────────────────────────────
     if state.turbo_mode:
-        mode_text = "渦輪"
+        mode_text = "⚡"
         if state.fever_active:
             mode_col = _CHUD_FEVER
         elif state.fever_cooldown_timer > 0:
@@ -480,16 +619,21 @@ def _draw_hud(painter: QPainter, state: GameState):
             mode_col = _CHUD_TURBO
     else:
         if state.kb_mode == "charge":
-            mode_text = "蓄力"
+            mode_text = "✪"
         elif state.kb_mode == "charge_legacy":
-            mode_text = "蓄力舊"
+            mode_text = "◇"
         else:
-            mode_text = "連打"
+            mode_text = "❉"
         mode_col = _CHUD_ACTIVE if state.kb_active else _CHUD_IDLE
 
     painter.setFont(_FONT_MODE)
+    fm_mode = painter.fontMetrics()
+    _mode_x = (AX + (_V2_TR_X if getattr(state, 'anvil_v2', True) else FACE_R)) / 2
     painter.setPen(QPen(mode_col))
-    painter.drawText(QPointF(FACE_R - 62, 444), mode_text)
+    painter.drawText(
+        QPointF(_mode_x - fm_mode.horizontalAdvance(mode_text) / 2, 447),
+        mode_text,
+    )
 
     # ── Charge bar ────────────────────────────────────────────────────────
     if state.show_charge_bar and state.kb_mode in ("charge", "charge_legacy") and state.kb_active:
@@ -514,7 +658,15 @@ def _draw_hud(painter: QPainter, state: GameState):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(QRectF(bx, by, bw, bh))
 
-    # ── Turbo / Fever overlay ─────────────────────────────────────────────
+    # Turbo / Fever overlay drawn in _draw_turbo_overlay (before anvil) so the
+    # anvil always renders on top of the fever text.
+
+
+# ── Turbo / Fever overlay (drawn BEFORE anvil so anvil stays on top) ─────────
+
+def _draw_turbo_overlay(painter: QPainter, state: GameState):
+    """Fever text, cooldown text, and charge-star display.
+    Called before the anvil so the anvil always renders on top."""
     if not state.turbo_mode:
         return
 
@@ -524,7 +676,7 @@ def _draw_hud(painter: QPainter, state: GameState):
         painter.setFont(_FONT_FEVER)
         fm_f = painter.fontMetrics()
         tx   = AX - fm_f.horizontalAdvance(fever_text) / 2
-        ty   = FACE_TOP - 50
+        ty   = FACE_TOP - 28
         painter.setPen(QPen(QColor(255, 50, 210, int(pulse * 150))))
         for ox, oy in ((-3, 0), (3, 0), (0, -3), (0, 3)):
             painter.drawText(QPointF(tx + ox, ty + oy), fever_text)

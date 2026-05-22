@@ -12,14 +12,20 @@ Settings:
 """
 import sys
 import os
+import hashlib as _hlib
 import winreg
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QGroupBox, QFormLayout, QFrame,
     QCheckBox, QRadioButton, QButtonGroup, QMessageBox, QWidget,
+    QLineEdit,
 )
 from PyQt5.QtCore import Qt, QTimer
+
+# Dev-tools gate — SHA-256 of the passphrase; plaintext NOT stored in source.
+# The bytes [0x35,0x32,0x31,0x31] are the ASCII codes of the passphrase chars.
+_DT_GATE = _hlib.sha256(bytes([0x35, 0x32, 0x31, 0x31])).hexdigest()
 
 _REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _REG_NAME = "BlacksmithWidget"
@@ -78,10 +84,11 @@ def _fmt_time(seconds: float) -> str:
 
 class SettingsDialog(QDialog):
 
-    def __init__(self, state, parent=None, center_cb=None):
+    def __init__(self, state, parent=None, center_cb=None, devtools_cb=None):
         super().__init__(parent)
-        self.state     = state
-        self._center_cb = center_cb
+        self.state        = state
+        self._center_cb   = center_cb
+        self._devtools_cb = devtools_cb
         self.setWindowTitle("⚙  設定")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
         self.setMinimumWidth(420)
@@ -136,6 +143,19 @@ class SettingsDialog(QDialog):
         cl  = QVBoxLayout()
         cl.setSpacing(8)
 
+        # Hidden dev-tools access — passphrase input + unlabelled trigger button
+        secret_row = QHBoxLayout()
+        self._secret_input = QLineEdit()
+        self._secret_input.setPlaceholderText("...")
+        self._secret_input.setMaxLength(16)
+        self._secret_input.returnPressed.connect(self._check_secret)
+        self._secret_btn = QPushButton()   # no label — intentionally blank
+        self._secret_btn.setFixedWidth(28)
+        self._secret_btn.clicked.connect(self._check_secret)
+        secret_row.addWidget(self._secret_input)
+        secret_row.addWidget(self._secret_btn)
+        cl.addLayout(secret_row)
+
         # UI scale
         scale_row = QHBoxLayout()
         scale_row.addWidget(QLabel(f"大小（默認 {int(_DEF_SCALE * 100)}%）:"))
@@ -179,10 +199,10 @@ class SettingsDialog(QDialog):
 
         # Mode selection (applies immediately)
         cl.addWidget(QLabel("遊戲模式:"))
-        self.charge_radio    = QRadioButton("蓄力模式")
-        self.combo_radio     = QRadioButton("連打模式")
-        self.charge_ex_radio = QRadioButton("蓄力模式 (舊版)")
-        self.turbo_radio     = QRadioButton("渦輪模式 ⚡ (實驗)")
+        self.charge_radio    = QRadioButton("✪ 蓄力模式")
+        self.combo_radio     = QRadioButton("❉ 連打模式")
+        self.charge_ex_radio = QRadioButton("◇ 蓄力模式 (舊版)")
+        self.turbo_radio     = QRadioButton("⚡ 渦輪模式 (實驗)")
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.charge_radio,    0)
         self.mode_group.addButton(self.combo_radio,     1)
@@ -229,20 +249,29 @@ class SettingsDialog(QDialog):
 
         self.fx_hit_numbers_cb = QCheckBox("打擊數字跳出")
         self.fx_heat_accum_cb  = QCheckBox("累積餘熱效果")
+        self.fx_anvil_v2_cb    = QCheckBox("新式鐵砧外觀")
 
         self.fx_hit_numbers_cb.setToolTip("打擊時在鐵砧上方顯示浮動數字")
         self.fx_heat_accum_cb.setToolTip("連續打擊會使鐵砧維持熾熱狀態較久")
+        self.fx_anvil_v2_cb.setToolTip("使用簡潔的圖標風格鐵砧（關閉則恢復經典樣式）")
 
         self.fx_hit_numbers_cb.toggled.connect(
             lambda v: setattr(self.state, 'show_hit_numbers', v))
         self.fx_heat_accum_cb.toggled.connect(
             lambda v: setattr(self.state, 'show_heat_accum', v))
+        self.fx_anvil_v2_cb.toggled.connect(
+            lambda v: setattr(self.state, 'anvil_v2', v))
 
         row_fx1 = QHBoxLayout()
         row_fx1.addWidget(self.fx_hit_numbers_cb)
         row_fx1.addWidget(self.fx_heat_accum_cb)
         row_fx1.addStretch()
         vl.addLayout(row_fx1)
+
+        row_fx2 = QHBoxLayout()
+        row_fx2.addWidget(self.fx_anvil_v2_cb)
+        row_fx2.addStretch()
+        vl.addLayout(row_fx2)
 
         vfx.setLayout(vl)
         root.addWidget(vfx)
@@ -276,6 +305,7 @@ class SettingsDialog(QDialog):
             (self.show_click_cb, 'show_click'),
             (self.fx_hit_numbers_cb,   'show_hit_numbers'),
             (self.fx_heat_accum_cb,    'show_heat_accum'),
+            (self.fx_anvil_v2_cb,      'anvil_v2'),
         ]:
             cb.blockSignals(True)
             cb.setChecked(getattr(s, attr))
@@ -357,6 +387,16 @@ class SettingsDialog(QDialog):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+
+    def _check_secret(self):
+        """Verify passphrase and open Dev Tools if it matches."""
+        code = self._secret_input.text()
+        if _hlib.sha256(code.encode()).hexdigest() == _DT_GATE:
+            self._secret_input.clear()
+            if self._devtools_cb is not None:
+                self._devtools_cb()
+        else:
+            self._secret_input.clear()   # wrong code — clear silently, give no hint
 
     def _confirm_reset(self):
         reply = QMessageBox.question(

@@ -1,8 +1,7 @@
 """
-Dev Tools dialog — opened by 5 consecutive clicks on the horn-tip triangle.
+Dev Tools dialog — opened via the hidden passphrase in Settings.
 
 Apply policy:
-  • Turbo mode toggle  → immediate (it's a switch, not a value)
   • All sliders / text fields → staged; only written to state when an
     Apply button is clicked.
 
@@ -117,19 +116,10 @@ class DevToolsDialog(QDialog):
         charge_box.setLayout(cl)
         root.addWidget(charge_box)
 
-        # ── 3. Turbo mode ─────────────────────────────────────────────────────
-        tg = QGroupBox("渦輪模式（實驗性）")
+        # ── 3. Turbo / Fever settings ─────────────────────────────────────────
+        tg = QGroupBox("渦輪 / Fever 設定")
         tl = QVBoxLayout()
         tl.setSpacing(8)
-
-        self.turbo_btn = QPushButton()
-        self.turbo_btn.clicked.connect(self._toggle_turbo)
-        tl.addWidget(self.turbo_btn)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setFrameShadow(QFrame.Sunken)
-        tl.addWidget(sep)
 
         # Fever 滿蓄要求 slider
         fl = QHBoxLayout()
@@ -190,8 +180,6 @@ class DevToolsDialog(QDialog):
         self.force_edit.setText(str(s.force_count))
         self.click_edit.setText(str(s.click_count))
 
-        self._refresh_turbo_btn()
-
         self.charge_bar_cb.blockSignals(True)
         self.charge_bar_cb.setChecked(s.show_charge_bar)
         self.charge_bar_cb.blockSignals(False)
@@ -209,28 +197,7 @@ class DevToolsDialog(QDialog):
         self.fever_dur_edit.setText(str(int(s.fever_duration)))
         self.fever_cd_edit.setText(str(int(s.fever_cooldown_duration)))
 
-    def _refresh_turbo_btn(self):
-        if self.state.turbo_mode:
-            self.turbo_btn.setText("⚡  渦輪模式：開啟  （點擊關閉）")
-            self.turbo_btn.setStyleSheet(
-                "background-color: #4a0080; color: #e0b0ff; font-weight: bold;"
-            )
-        else:
-            self.turbo_btn.setText("⚡  渦輪模式：關閉  （點擊開啟）")
-            self.turbo_btn.setStyleSheet("")
-
     # ── Individual apply actions ──────────────────────────────────────────────
-
-    def _toggle_turbo(self):
-        """Turbo toggle applies immediately — it's a switch, not a pending value."""
-        s = self.state
-        s.turbo_mode = not s.turbo_mode
-        if not s.turbo_mode:
-            if s.fever_active:
-                s._exit_fever()
-            s.fever_cooldown_timer    = 0.0
-            s.consecutive_full_charge = 0
-        self._refresh_turbo_btn()
 
     def _apply_counters(self):
         try:
