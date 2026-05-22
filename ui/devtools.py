@@ -152,7 +152,26 @@ class DevToolsDialog(QDialog):
         tg.setLayout(tl)
         root.addWidget(tg)
 
-        # ── 4. Bottom buttons ─────────────────────────────────────────────────
+        # ── 4. 暴擊設定 ───────────────────────────────────────────────────────
+        crit_box  = QGroupBox("暴擊設定")
+        crit_form = QFormLayout()
+        crit_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        self.crit_rate_edit = QLineEdit()
+        self.crit_rate_edit.setToolTip("暴擊率（%），例如 5.0 = 5%")
+        self.crit_mult_edit = QLineEdit()
+        self.crit_mult_edit.setToolTip("暴擊力道倍率，例如 3.0 = 3 倍")
+
+        crit_form.addRow("暴擊率（%，默認 5.0）:", self.crit_rate_edit)
+        crit_form.addRow("暴擊倍率（默認 3.0）:",   self.crit_mult_edit)
+
+        apply_crit = QPushButton("套用暴擊設定")
+        apply_crit.clicked.connect(self._apply_crit)
+        crit_form.addRow(apply_crit)
+        crit_box.setLayout(crit_form)
+        root.addWidget(crit_box)
+
+        # ── 5. Bottom buttons ─────────────────────────────────────────────────
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setFrameShadow(QFrame.Sunken)
@@ -197,6 +216,10 @@ class DevToolsDialog(QDialog):
         self.fever_dur_edit.setText(str(int(s.fever_duration)))
         self.fever_cd_edit.setText(str(int(s.fever_cooldown_duration)))
 
+        # Crit settings — rate stored as 0.0–1.0, displayed as %
+        self.crit_rate_edit.setText(f"{s.crit_rate * 100:.1f}")
+        self.crit_mult_edit.setText(f"{s.crit_mult:.1f}")
+
     # ── Individual apply actions ──────────────────────────────────────────────
 
     def _apply_counters(self):
@@ -221,10 +244,23 @@ class DevToolsDialog(QDialog):
         except ValueError:
             pass
 
+    def _apply_crit(self):
+        try:
+            rate = float(self.crit_rate_edit.text())
+            self.state.crit_rate = max(0.0, min(1.0, rate / 100.0))
+        except ValueError:
+            pass
+        try:
+            mult = float(self.crit_mult_edit.text())
+            self.state.crit_mult = max(1.0, mult)
+        except ValueError:
+            pass
+
     def _apply_all(self):
         self._apply_counters()
         self._apply_charge()
         self._apply_fever_settings()
+        self._apply_crit()
 
     def _apply_all_and_close(self):
         self._apply_all()

@@ -81,7 +81,11 @@ _CHUD_BARBOR = QColor(80,  80,  80)
 
 # ── Pre-cached QFont objects ──────────────────────────────────────────────────
 
-_FONT_COUNTER = QFont("Segoe UI", 15)
+_FONT_COUNTER    = QFont("Segoe UI", 15)
+_FONT_METAL_NUM  = QFont("Segoe UI",  9)
+_FONT_METAL_NUM.setBold(True)
+_FONT_HIT_NUM_CRIT = QFont("Arial", 26)
+_FONT_HIT_NUM_CRIT.setBold(True)
 _FONT_MODE    = QFont("Segoe UI", 17)
 _FONT_FEVER   = QFont("Arial", 26)
 _FONT_FEVER.setBold(True)
@@ -176,6 +180,9 @@ _V2_BR_X = 468   # bot-right x
 _V2_BL_X = 308   # bot-left  x
 _V2_BASE_SHIFT = 8   # base shifted right (px)
 
+# Metal width: starts narrow, expands to full anvil face width as quality increases
+_METAL_W_START = 60.0
+
 _POLY_V2_FACE_BODY = QPolygonF([
     QPointF(_V2_TL_X, FACE_TOP + 12),   # 293, 342
     QPointF(_V2_TR_X, FACE_TOP + 12),   # 516, 342
@@ -226,6 +233,7 @@ def draw_frame(painter: QPainter, state: GameState):
             _draw_anvil_v2(painter, state)
         else:
             _draw_anvil(painter, state)
+        _draw_metal(painter, state)
     _draw_sparks(painter, state)
     _draw_hammer(painter, state, cos_a, sin_a)
     if not state.hide_anvil:
@@ -376,6 +384,72 @@ def _draw_anvil_v2(painter: QPainter, state: GameState):
         painter.drawRect(QRectF(_V2_TL_X, FACE_TOP, _V2_TR_X - _V2_TL_X, 12))
 
 
+# ── Metal piece ───────────────────────────────────────────────────────────────
+
+def _draw_metal(painter: QPainter, state: GameState):
+    """Draw the current metal piece sitting on the anvil face."""
+    m = getattr(state, 'current_metal', None)
+    if m is None or m.dead:
+        return
+
+    # Spawn scale-in animation
+    spawn_scale = min(1.0, m.spawn_t)
+    if spawn_scale <= 0.01:
+        return
+
+    # Completion flash: pulse bright then fade out
+    if m.flash_t > 0.0:
+        # Brief white-hot pulse (0→0.3), then fade (0.3→1.0)
+        if m.flash_t < 0.3:
+            brightness = m.flash_t / 0.3          # 0→1
+            alpha = 255
+        else:
+            brightness = 0.0
+            alpha = int((1.0 - (m.flash_t - 0.3) / 0.7) * 255)
+        alpha = max(0, alpha)
+    else:
+        brightness = 0.0
+        alpha = 255
+
+    # Geometry — centred on AX, width matches v2 face, sits on FACE_TOP
+    r, g, b   = m.color
+    # Mix toward white for the brightness pulse
+    r = min(255, int(r + brightness * (255 - r)))
+    g = min(255, int(g + brightness * (255 - g)))
+    b = min(255, int(b + brightness * (255 - b)))
+
+    thickness = m.thickness * spawn_scale
+    # Width expands from _METAL_W_START toward full anvil face width as quality grows
+    metal_w   = (_METAL_W_START + ((_V2_TR_X - _V2_TL_X) - _METAL_W_START) * m.ratio) * spawn_scale
+    mx        = AX - metal_w / 2
+    my        = FACE_TOP - thickness
+
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(QColor(r, g, b, alpha)))
+    painter.drawRoundedRect(QRectF(mx, my, metal_w, thickness), 3, 3)
+
+    # Subtle top-edge highlight (brighter strip)
+    hl_h = max(2.0, thickness * 0.15)
+    painter.setBrush(QBrush(QColor(
+        min(255, r + 40), min(255, g + 40), min(255, b + 40), alpha)))
+    painter.drawRoundedRect(QRectF(mx + 2, my, metal_w - 4, hl_h), 2, 2)
+
+    # Number label — centred in the metal rect
+    if thickness >= 12 and alpha > 30:
+        painter.setFont(_FONT_METAL_NUM)
+        fm  = painter.fontMetrics()
+        txt = str(m.number)
+        tx  = AX - fm.horizontalAdvance(txt) / 2
+        ty  = my + (thickness + fm.ascent() - fm.descent()) / 2
+        # Shadow
+        painter.setPen(QPen(QColor(0, 0, 0, min(alpha, 160))))
+        painter.drawText(QPointF(tx + 1, ty + 1), txt)
+        # Text
+        painter.setPen(QPen(QColor(255, 255, 255, alpha)))
+        painter.drawText(QPointF(tx, ty), txt)
+        painter.setPen(Qt.NoPen)
+
+
 # ── Hammer ────────────────────────────────────────────────────────────────────
 
 def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float):
@@ -486,12 +560,19 @@ def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float
 
 
 def _render_vcy_fast(state: GameState, cos_a: float, sin_a: float) -> float:
-    """Clamp vcy so the hammer face doesn't visually penetrate the anvil.
+    """Clamp vcy so the hammer face doesn't visually penetrate the anvil or metal.
     Reuses already-computed cos_a / sin_a from draw_frame — avoids redundant trig."""
     face_y = state.vcy + HEAD_OFFSET * sin_a - HEAD_PERP * cos_a
     face_x = state.vcx + HEAD_OFFSET * cos_a + HEAD_PERP * sin_a
-    if face_y > FACE_TOP and FACE_L - 20 <= face_x <= FACE_R + 20:
-        return FACE_TOP - HEAD_OFFSET * sin_a + HEAD_PERP * cos_a
+    # Visual surface rises by metal thickness when metal is visible and fully spawned
+    m = getattr(state, 'current_metal', None)
+    if (not state.hide_anvil and m is not None and not m.dead
+            and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
+        visual_top = FACE_TOP - m.thickness
+    else:
+        visual_top = FACE_TOP
+    if face_y > visual_top and FACE_L - 20 <= face_x <= FACE_R + 20:
+        return visual_top - HEAD_OFFSET * sin_a + HEAD_PERP * cos_a
     return state.vcy
 
 
@@ -531,36 +612,65 @@ def _draw_flash(painter: QPainter, state: GameState):
     sf = state.strike_flash
     if sf < 0.004:
         return
+    # Flash anchored to the actual hit surface (metal top or anvil face)
+    hit_y  = getattr(state, 'last_hit_surface_y', float(FACE_TOP))
+    m      = getattr(state, 'current_metal', None)
+    if (not state.hide_anvil and m is not None and not m.dead
+            and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
+        fl = AX - (_V2_TR_X - _V2_TL_X) / 2
+        fw = float(_V2_TR_X - _V2_TL_X)
+    else:
+        fl = float(FACE_L)
+        fw = float(FACE_R - FACE_L)
     spread = 60 * sf
     sr, sg, sb = state.strike_color
     painter.setPen(Qt.NoPen)
     painter.setBrush(QBrush(QColor(sr, sg, sb, int(sf * 200))))
     painter.drawRect(QRectF(
-        FACE_L - spread, FACE_TOP - spread * 0.5,
-        (FACE_R - FACE_L) + spread * 2, 18 + spread,
+        fl - spread, hit_y - spread * 0.5,
+        fw + spread * 2, 18 + spread,
     ))
+    # Crit bonus flash — extra bright gold + white burst
+    if getattr(state, 'last_crit', False):
+        painter.setBrush(QBrush(QColor(255, 230, 50, int(sf * 130))))
+        painter.drawRect(QRectF(
+            fl - spread * 1.6, hit_y - spread * 0.9,
+            fw + spread * 3.2, 22 + spread * 1.6,
+        ))
+        painter.setBrush(QBrush(QColor(255, 255, 255, int(sf * 90))))
+        painter.drawRect(QRectF(
+            fl - spread * 0.5, hit_y - spread * 0.25,
+            fw + spread, 12 + spread * 0.5,
+        ))
 
 
 # ── Hit number popups (Feature 2) ────────────────────────────────────────────
 
 def _draw_hit_numbers(painter: QPainter, state: GameState):
-    """Draw floating "+N" numbers that rise from the anvil face after each hit."""
+    """Draw floating "+N" numbers that rise from the anvil face after each hit.
+    Critical hits use a larger gold font."""
     if not state.show_hit_numbers or not state.hit_numbers:
         return
-    painter.setFont(_FONT_HIT_NUM)
-    fm = painter.fontMetrics()
     for hn in state.hit_numbers:
         t     = hn["age"] / hn["max_age"]            # 0 → 1
         alpha = int((1.0 - t ** 1.6) * 255)
         if alpha < 4:
             continue
+        is_crit = hn.get("crit", False)
         text = f"+{hn['value']}"
-        r, g, b = hn["color"]
+        if is_crit:
+            painter.setFont(_FONT_HIT_NUM_CRIT)
+            r, g, b = 255, 230, 50   # gold
+        else:
+            painter.setFont(_FONT_HIT_NUM)
+            r, g, b = hn["color"]
+        fm = painter.fontMetrics()
         tx = hn["x"] - fm.horizontalAdvance(text) / 2
         ty = hn["y"]
-        # Shadow
+        # Shadow (slightly thicker for crit)
         painter.setPen(QPen(QColor(0, 0, 0, min(255, alpha))))
-        for ox, oy in _SHADOW_OFS:
+        shadow_ofs = ((-2, 0), (2, 0), (0, -2), (0, 2)) if is_crit else _SHADOW_OFS
+        for ox, oy in shadow_ofs:
             painter.drawText(QPointF(tx + ox, ty + oy), text)
         # Text
         painter.setPen(QPen(QColor(r, g, b, alpha)))

@@ -9,6 +9,7 @@ Modes:
 import math
 import random
 from save import load_save
+from game.metal import MetalPiece, pick_metal, METAL_TYPES, SPAWN_DUR, FLASH_DUR
 from config import (
     GAME_W, GAME_H,
     AX, AY_BASE, FACE_TOP, FACE_L, FACE_R,
@@ -151,6 +152,21 @@ class GameState:
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
 
+        # ── Metal forging system ───────────────────────────────────────────
+        # forge_counts is saved; metal_spawned and current_metal are transient.
+        _fc = _sv.get("forge_counts", [])
+        self.forge_counts: list = [int(_fc[i]) if i < len(_fc) else 0
+                                   for i in range(len(METAL_TYPES))]
+        self.metal_spawned:  bool                  = False   # first strike done?
+        self.current_metal:  MetalPiece | None     = None
+        # Last hit surface Y — updated each strike, used by renderer for sparks / flash
+        self.last_hit_surface_y: float = float(FACE_TOP)
+
+        # ── Critical hit system ────────────────────────────────────────────
+        self.crit_rate: float = float(_sv.get("crit_rate", 0.05))   # 0.0–1.0
+        self.crit_mult: float = float(_sv.get("crit_mult", 3.0))    # force multiplier
+        self.last_crit: bool  = False   # transient: was last hit a crit?
+
     # ─────────────────────────────────────────────────────────────────────────
     # Geometry (exact port from JS)
     # ─────────────────────────────────────────────────────────────────────────
@@ -214,6 +230,18 @@ class GameState:
                 if _hn["age"] < _hn["max_age"]:
                     _alive_hn.append(_hn)
             self.hit_numbers = _alive_hn
+
+        # ── Metal forging animations ──────────────────────────────────────
+        if self.current_metal is not None:
+            m = self.current_metal
+            if m.spawn_t < 1.0:
+                m.spawn_t = min(1.0, m.spawn_t + dt / SPAWN_DUR)
+            if m.flash_t > 0.0:
+                m.flash_t = min(1.0, m.flash_t + dt / FLASH_DUR)
+                if m.flash_t >= 1.0:
+                    m.dead = True
+                    self.current_metal = None
+                    self._spawn_metal()   # immediately queue next
 
         # ── Charge auto-slam timers (lift mode) ───────────────────────────
         # Two independent triggers: hard-cap window OR inactivity gap.
@@ -327,6 +355,9 @@ class GameState:
             "hide_anvil":              self.hide_anvil,
             "lock_position":           self.lock_position,
             "anvil_v2":                self.anvil_v2,
+            "forge_counts":            list(self.forge_counts),
+            "crit_rate":               self.crit_rate,
+            "crit_mult":               self.crit_mult,
         }
 
     def reset_save(self):
@@ -384,6 +415,15 @@ class GameState:
         self.lock_position      = False
         self.anvil_v2           = True
         self.mouse_on_widget    = False
+        # Metal forging
+        self.forge_counts        = [0] * len(METAL_TYPES)
+        self.metal_spawned       = False
+        self.current_metal       = None
+        self.last_hit_surface_y  = float(FACE_TOP)
+        # Crit
+        self.crit_rate  = 0.05
+        self.crit_mult  = 3.0
+        self.last_crit  = False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -526,8 +566,25 @@ class GameState:
         # Pre-compute charge for feature 2 popup (before typing_charge is reset below)
         _charge_n_popup = (max(1, self.typing_charge)
                            if self.kb_mode in ("charge", "charge_legacy") else 1)
+        # Metal force — same unit as force_count increment; captured before reset
+        _metal_force = (_charge_n_popup if self.kb_mode in ("charge", "charge_legacy")
+                        else 1)
+        # Actual visual hit surface Y: top of metal when visible, else anvil face
+        _m = self.current_metal
+        if (not self.hide_anvil and _m is not None and not _m.dead
+                and _m.spawn_t >= 1.0 and _m.flash_t <= 0.0):
+            _hit_y = FACE_TOP - _m.thickness
+        else:
+            _hit_y = float(FACE_TOP)
+        self.last_hit_surface_y = _hit_y
 
         f = int(min(max(self.vel_y, 0), 2000))
+        # Critical hit — multiplies force for quality, intensity, and visuals
+        is_crit       = random.random() < self.crit_rate
+        self.last_crit = is_crit
+        if is_crit:
+            f            = int(f * self.crit_mult)
+            _metal_force = int(_metal_force * self.crit_mult)
         self.last_force   = f
         self.has_hit      = True
         self.hit_cooldown = 380.0
@@ -575,12 +632,13 @@ class GameState:
         # Floating hit number popup
         if self.show_hit_numbers:
             self.hit_numbers.append({
-                "value":   _charge_n_popup,
+                "value":   _metal_force,
                 "x":       hit_x,
-                "y":       float(FACE_TOP - 8),
+                "y":       _hit_y - 8,
                 "age":     0.0,
-                "max_age": 0.80,
+                "max_age": 0.80 if not is_crit else 1.10,
                 "color":   self.strike_color,
+                "crit":    is_crit,
             })
 
         # Heat accumulation — raise heat level on each hit
@@ -591,9 +649,29 @@ class GameState:
         self.vcvx = 0.0
 
         cnt = int((10 + intensity * 60) * charge_mult)
-        self._emit_sparks(hit_x, FACE_TOP, cnt, intensity)
+        self._emit_sparks(hit_x, _hit_y, cnt, intensity)
+
+        # ── Metal forging logic ────────────────────────────────────────────
+        if self.current_metal is not None:
+            m = self.current_metal
+            if m.complete:
+                # This strike triggers flash — count only once (flash_t guard)
+                if m.flash_t <= 0.0:
+                    m.flash_t = 0.001
+                    self.forge_counts[m.type_idx] += 1
+            elif m.spawn_t >= 1.0:
+                # Metal fully spawned — accumulate quality
+                m.add_quality(float(_metal_force))
+        elif not self.metal_spawned:
+            # Very first strike of this session → spawn first metal
+            self.metal_spawned = True
+            self._spawn_metal()
 
         return (intensity, charge_mult)
+
+    def _spawn_metal(self):
+        """Spawn a new metal piece on the anvil (weighted random type)."""
+        self.current_metal = MetalPiece(pick_metal())
 
     def _enter_fever(self):
         """Enter Fever state: switch to combo mode for fever_duration seconds."""
