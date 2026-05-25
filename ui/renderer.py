@@ -803,17 +803,23 @@ def _draw_turbo_lines(painter: QPainter, state: GameState,
     line_xs = (_MI_CX - _MI_LINE_DX, _MI_CX, _MI_CX + _MI_LINE_DX)
 
     if state.fever_active:
-        # Fever：脈動粉紫
-        pulse = 0.55 + 0.45 * abs(math.sin(t * 5.0))
-        for lx in line_xs:
-            fr = min(255, int(255 * min(1.0, pulse * 1.1)))
-            fg = int(55  * pulse)
-            fb = min(255, int(220 * pulse))
-            # 打擊閃光疊加
-            fr = min(255, int(fr + glow * max(0, sr - fr)))
-            fg = min(255, int(fg + glow * max(0, sg - fg)))
-            fb = min(255, int(fb + glow * max(0, sb - fb)))
-            painter.setBrush(QBrush(QColor(fr, fg, fb, int(200 * pulse))))
+        # Fever：粉紫脈動，活躍直線（turbo_line_idx）更亮，模仿連打三角點輪換
+        pulse      = 0.55 + 0.45 * abs(math.sin(t * 5.0))
+        active_ln  = getattr(state, 'turbo_line_idx', -1)  # -1 = fever 尚未打擊
+        for idx, lx in enumerate(line_xs):
+            is_active = (active_ln >= 0 and idx == active_ln)
+            # 活躍線：全亮；非活躍線（已有亮線時）：降至 45% 亮度
+            dim = 1.0 if (is_active or active_ln < 0) else 0.45
+            fr  = min(255, int(255 * pulse * dim))
+            fg  = int(55 * pulse * dim)
+            fb  = min(255, int(220 * pulse * dim))
+            # 打擊閃光疊加（活躍線接受更多 strike_color）
+            mix = 1.0 if is_active else 0.5
+            fr  = min(255, int(fr + glow * max(0, sr - fr) * mix))
+            fg  = min(255, int(fg + glow * max(0, sg - fg) * mix))
+            fb  = min(255, int(fb + glow * max(0, sb - fb) * mix))
+            fa  = int((200 if is_active else 140 if active_ln >= 0 else 200) * pulse)
+            painter.setBrush(QBrush(QColor(fr, fg, fb, fa)))
             painter.drawRoundedRect(QRectF(lx - lw/2, y0, lw, ht), 1.5, 1.5)
 
     elif state.fever_cooldown_timer > 0:
@@ -886,7 +892,7 @@ def _draw_combo_dots(painter: QPainter, state: GameState,
                      glow: float, sr: int, sg: int, sb: int):
     """連打模式：三個小圓構成正三角，逆時針輪流亮起（藍色）。"""
     painter.setPen(Qt.NoPen)
-    active = getattr(state, 'combo_dot_idx', 0) % 3
+    active = getattr(state, 'combo_dot_idx', -1)   # -1 = 尚未打擊，無亮點
     for i, (dx, dy) in enumerate(_MI_DOT_POS):
         if i == active:
             # 亮點：鮮藍色底，打擊後短暫混入 strike_color

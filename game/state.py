@@ -155,8 +155,10 @@ class GameState:
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
 
-        # Transient: 連打模式三角點指示器（暫態，不存檔）
-        self.combo_dot_idx: int = 0
+        # Transient: 連打模式三角點指示器（-1 = 尚未打擊，無亮點）
+        self.combo_dot_idx: int  = -1
+        # Transient: 渦輪 fever 連打直線指示器（-1 = fever 尚未打擊）
+        self.turbo_line_idx: int = -1
 
         # ── Metal forging system ───────────────────────────────────────────
         _fc = _sv.get("forge_counts", [])
@@ -469,8 +471,9 @@ class GameState:
         # Crit
         self.crit_rate  = 0.05
         self.crit_mult  = 3.0
-        self.last_crit  = False
-        self.combo_dot_idx = 0
+        self.last_crit      = False
+        self.combo_dot_idx  = -1
+        self.turbo_line_idx = -1
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -718,6 +721,9 @@ class GameState:
         # 連打模式三角點：每次打擊推進一格（非渦輪模式）
         if self.kb_mode == "combo" and not self.turbo_mode:
             self.combo_dot_idx = (self.combo_dot_idx + 1) % 3
+        # 渦輪 fever 連打直線：每次打擊輪換亮線
+        if self.turbo_mode and self.fever_active:
+            self.turbo_line_idx = (self.turbo_line_idx + 1) % 3
 
         return (intensity, charge_mult)
 
@@ -737,6 +743,7 @@ class GameState:
         self.typing_cooldown     = 0.0
         self.charge_prefire      = False
         self.charge_pulses.clear()
+        self.turbo_line_idx      = -1   # 重置直線輪換索引
 
     def _exit_fever(self):
         """Exit Fever state: switch back to charge mode, start cooldown."""
