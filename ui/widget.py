@@ -265,10 +265,13 @@ class BlacksmithWidget(QWidget):
             self.move(geo.center() - self.rect().center())
 
     def _move_to_center(self):
-        """Move widget to the centre of whichever screen it currently overlaps."""
+        """Move widget to the centre of whichever screen it currently overlaps,
+        then temporarily raise it to the front (does NOT re-enable always-on-top)."""
         from PyQt5.QtWidgets import QApplication
         geo = QApplication.desktop().availableGeometry(self)
         self.move(geo.center() - self.rect().center())
+        self.raise_()
+        self.activateWindow()
 
     # ── Game loop ─────────────────────────────────────────────────────────────
 
