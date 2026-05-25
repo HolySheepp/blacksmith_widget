@@ -534,6 +534,11 @@ class BlacksmithWidget(QWidget):
     def _toggle_always_on_top(self):
         self.state.always_on_top = not self.state.always_on_top
         self._apply_always_on_top(self.state.always_on_top)
+        # Keep tray menu text in sync (tray menu is built once, not rebuilt each open)
+        if hasattr(self, '_tray_top_act') and self._tray_top_act is not None:
+            self._tray_top_act.setText(
+                "🔝  取消永遠置頂" if self.state.always_on_top else "🔝  永遠置頂"
+            )
 
     # ── Auto-update ───────────────────────────────────────────────────────────
 
@@ -763,12 +768,12 @@ class BlacksmithWidget(QWidget):
         c_act.triggered.connect(self._move_to_center)
         menu.addAction(c_act)
 
-        top_act = QAction(
+        self._tray_top_act = QAction(
             "🔝  取消永遠置頂" if self.state.always_on_top else "🔝  永遠置頂",
             menu,
         )
-        top_act.triggered.connect(self._toggle_always_on_top)
-        menu.addAction(top_act)
+        self._tray_top_act.triggered.connect(self._toggle_always_on_top)
+        menu.addAction(self._tray_top_act)
 
         menu.addSeparator()
 
