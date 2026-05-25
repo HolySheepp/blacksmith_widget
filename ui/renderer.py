@@ -904,22 +904,22 @@ def _draw_combo_dots(painter: QPainter, state: GameState,
     painter.setPen(Qt.NoPen)
     active = getattr(state, 'combo_dot_idx', -1)   # -1 = 尚未打擊，無效果
     for i, (dx, dy) in enumerate(_MI_DOT_POS):
-        # 打擊縮小光圈：淡品紅，透明度降低
+        # 打擊縮小光圈：鮮亮藍（混入 strike_color）
         if i == active and glow > 0.04:
             glow_r = _MI_DOT_R + 3.0 + glow * 5.5
             painter.setBrush(QBrush(QColor(
-                255,                           # R 全滿，更亮更淺
-                min(255, int(100 * glow)),     # G 提高，偏淡粉
-                min(255, int(230 * glow)),     # B
-                int(glow * 155),               # alpha 降低（原 200→155）
+                min(255, int(80  + glow * max(0, sr - 80))),
+                min(255, int(170 + glow * max(0, sg - 170))),
+                255,
+                int(glow * 200),
             )))
             painter.drawEllipse(QPointF(dx, dy), glow_r, glow_r)
-        # 點本體：活躍點打擊時短暫淡藍色（隨 glow 衰退），其餘始終暗色
+        # 點本體：活躍點打擊時短暫亮藍（隨 glow 衰退），其餘始終暗色
         if i == active and glow > 0.04:
-            r = min(255, int(22 + (120 - 22) * glow))   # 暗→淡藍
-            g = min(255, int(22 + (190 - 22) * glow))
+            r = min(255, int(22 + ( 70 - 22) * glow))
+            g = min(255, int(22 + (160 - 22) * glow))
             b = min(255, int(25 + (255 - 25) * glow))
-            a = min(255, int(215 + 25        * glow))
+            a = min(255, int(215 + 40        * glow))
         else:
             r = min(255, int(22 + glow * (sr - 22) * 0.28))
             g = min(255, int(22 + glow * (sg - 22) * 0.28))
