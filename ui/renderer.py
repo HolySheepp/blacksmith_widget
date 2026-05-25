@@ -914,11 +914,17 @@ def _draw_combo_dots(painter: QPainter, state: GameState,
                 int(glow * 210),
             )))
             painter.drawEllipse(QPointF(dx, dy), glow_r, glow_r)
-        # 點本體：始終暗色（不持續亮），打擊時只微微帶一點 strike_color
-        r = min(255, int(22 + glow * (sr - 22) * 0.28))
-        g = min(255, int(22 + glow * (sg - 22) * 0.28))
-        b = min(255, int(25 + glow * (sb - 25) * 0.32))
-        a = 215
+        # 點本體：活躍點打擊時短暫紫色（隨 glow 衰退），其餘始終暗色
+        if i == active and glow > 0.04:
+            r = min(255, int(22  + (148 - 22)  * glow))   # 暗→紫
+            g = min(255, int(22  + ( 28 - 22)  * glow))
+            b = min(255, int(25  + (230 - 25)  * glow))
+            a = min(255, int(215 + ( 40)       * glow))
+        else:
+            r = min(255, int(22 + glow * (sr - 22) * 0.28))
+            g = min(255, int(22 + glow * (sg - 22) * 0.28))
+            b = min(255, int(25 + glow * (sb - 25) * 0.32))
+            a = 215
         painter.setBrush(QBrush(QColor(r, g, b, a)))
         painter.drawEllipse(QPointF(dx, dy), _MI_DOT_R, _MI_DOT_R)
 
