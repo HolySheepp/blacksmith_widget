@@ -11,3 +11,4 @@ __pycache__/
 # For Developer
 testversion/
 switch.bat
+branch.bat
