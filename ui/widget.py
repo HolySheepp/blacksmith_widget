@@ -24,6 +24,7 @@ from game.state     import GameState
 from ui.renderer    import draw_frame
 from ui.devtools    import DevToolsDialog
 from ui.settings    import SettingsDialog
+from ui.stats       import StatsDialog
 from input.listener import KeyboardListener
 from save           import write_save
 from ui.settings    import _autostart_set
@@ -169,6 +170,9 @@ class BlacksmithWidget(QWidget):
 
         # Settings dialog
         self._settings_dialog: SettingsDialog | None = None
+
+        # Stats dialog
+        self._stats_dialog: StatsDialog | None = None
 
         # System tray icon
         self._tray: QSystemTrayIcon | None = None
@@ -385,6 +389,15 @@ class BlacksmithWidget(QWidget):
         self._dt_dialog = dlg
         self._place_dialog(dlg)
 
+    def _open_stats(self):
+        if self._stats_dialog is not None and self._stats_dialog.isVisible():
+            self._stats_dialog.raise_()
+            self._stats_dialog.activateWindow()
+            return
+        dlg = StatsDialog(self.state, self)
+        self._stats_dialog = dlg
+        self._place_dialog(dlg)
+
     def _apply_always_on_top(self, enabled: bool):
         """Apply the always-on-top window flag and re-show.  Called by settings checkbox
         and by _toggle_always_on_top.  Does NOT update state — caller is responsible."""
@@ -457,6 +470,10 @@ class BlacksmithWidget(QWidget):
         menu.addAction(top_act)
 
         menu.addSeparator()
+
+        stats_act = QAction("📊  統計資料", self)
+        stats_act.triggered.connect(self._open_stats)
+        menu.addAction(stats_act)
 
         settings_act = QAction("⚙  設定", self)
         settings_act.triggered.connect(self._open_settings)

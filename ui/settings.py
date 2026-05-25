@@ -97,48 +97,12 @@ class SettingsDialog(QDialog):
         self._build_ui()
         self._load_from_state()
 
-        # Auto-refresh stats every second
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(1000)
-        self._refresh_timer.timeout.connect(self._refresh_stats)
-        self._refresh_timer.start()
-
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setSpacing(10)
         root.setContentsMargins(12, 12, 12, 12)
-
-        # ── Statistics ────────────────────────────────────────────────────────
-        sg   = QGroupBox("統計資料")
-        sf   = QFormLayout()
-        sf.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-
-        self.playtime_lbl  = QLabel()
-        sf.addRow("遊玩時長:", self.playtime_lbl)
-
-        self.hit_val_lbl   = QLabel()
-        self.force_val_lbl = QLabel()
-        self.click_val_lbl = QLabel()
-        self.show_hit_cb   = QCheckBox()
-        self.show_force_cb = QCheckBox()
-        self.show_click_cb = QCheckBox()
-
-        sf.addRow("打擊計數:", self._stat_row(self.hit_val_lbl,   self.show_hit_cb))
-        sf.addRow("力道計數:", self._stat_row(self.force_val_lbl, self.show_force_cb))
-        sf.addRow("點擊計數:", self._stat_row(self.click_val_lbl, self.show_click_cb))
-
-        # Checkboxes apply immediately
-        self.show_hit_cb.toggled.connect(
-            lambda v: setattr(self.state, 'show_hit', v))
-        self.show_force_cb.toggled.connect(
-            lambda v: setattr(self.state, 'show_force', v))
-        self.show_click_cb.toggled.connect(
-            lambda v: setattr(self.state, 'show_click', v))
-
-        sg.setLayout(sf)
-        root.addWidget(sg)
 
         # ── Settings ──────────────────────────────────────────────────────────
         cfg = QGroupBox("設定")
@@ -259,13 +223,17 @@ class SettingsDialog(QDialog):
         vl  = QVBoxLayout()
         vl.setSpacing(6)
 
-        self.fx_hit_numbers_cb = QCheckBox("打擊數字跳出")
-        self.fx_heat_accum_cb  = QCheckBox("累積餘熱效果")
-        self.fx_anvil_v2_cb    = QCheckBox("新式鐵砧外觀")
+        self.fx_hit_numbers_cb  = QCheckBox("打擊數字跳出")
+        self.fx_heat_accum_cb   = QCheckBox("累積餘熱效果")
+        self.fx_anvil_v2_cb     = QCheckBox("新式鐵砧外觀")
+        self.fx_pulse_cb        = QCheckBox("打擊脈衝效果")
+        self.fx_metal_forge_cb  = QCheckBox("金屬鍛造")
 
         self.fx_hit_numbers_cb.setToolTip("打擊時在鐵砧上方顯示浮動數字")
         self.fx_heat_accum_cb.setToolTip("連續打擊會使鐵砧維持熾熱狀態較久")
         self.fx_anvil_v2_cb.setToolTip("使用簡潔的圖標風格鐵砧（關閉則恢復經典樣式）")
+        self.fx_pulse_cb.setToolTip("關閉後隱藏打擊時在鐵砧面或金屬塊上閃爍的框框")
+        self.fx_metal_forge_cb.setToolTip("關閉後鐵砧上不會出現金屬塊，純粹打擊；已鍛造計數仍保留")
 
         self.fx_hit_numbers_cb.toggled.connect(
             lambda v: setattr(self.state, 'show_hit_numbers', v))
@@ -273,6 +241,10 @@ class SettingsDialog(QDialog):
             lambda v: setattr(self.state, 'show_heat_accum', v))
         self.fx_anvil_v2_cb.toggled.connect(
             lambda v: setattr(self.state, 'anvil_v2', v))
+        self.fx_pulse_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_strike_pulse', v))
+        self.fx_metal_forge_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_metal_forge', v))
 
         row_fx1 = QHBoxLayout()
         row_fx1.addWidget(self.fx_hit_numbers_cb)
@@ -282,8 +254,14 @@ class SettingsDialog(QDialog):
 
         row_fx2 = QHBoxLayout()
         row_fx2.addWidget(self.fx_anvil_v2_cb)
+        row_fx2.addWidget(self.fx_pulse_cb)
         row_fx2.addStretch()
         vl.addLayout(row_fx2)
+
+        row_fx3 = QHBoxLayout()
+        row_fx3.addWidget(self.fx_metal_forge_cb)
+        row_fx3.addStretch()
+        vl.addLayout(row_fx3)
 
         vfx.setLayout(vl)
         root.addWidget(vfx)
@@ -293,31 +271,18 @@ class SettingsDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         root.addWidget(close_btn)
 
-    @staticmethod
-    def _stat_row(val_lbl: QLabel, cb: QCheckBox) -> QWidget:
-        """Value label + '顯示在鐵砧' text + checkbox, packed in a QWidget."""
-        w   = QWidget()
-        row = QHBoxLayout(w)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(val_lbl, 1)
-        row.addWidget(QLabel("  顯示在鐵砧"))
-        row.addWidget(cb)
-        return w
-
     # ── Load / refresh ────────────────────────────────────────────────────────
 
     def _load_from_state(self):
         s = self.state
-        self._refresh_stats()
 
         # Block signals to avoid spurious setattr calls on load
         for cb, attr in [
-            (self.show_hit_cb,   'show_hit'),
-            (self.show_force_cb, 'show_force'),
-            (self.show_click_cb, 'show_click'),
             (self.fx_hit_numbers_cb,   'show_hit_numbers'),
             (self.fx_heat_accum_cb,    'show_heat_accum'),
             (self.fx_anvil_v2_cb,      'anvil_v2'),
+            (self.fx_pulse_cb,         'show_strike_pulse'),
+            (self.fx_metal_forge_cb,   'show_metal_forge'),
         ]:
             cb.blockSignals(True)
             cb.setChecked(getattr(s, attr))
@@ -349,13 +314,6 @@ class SettingsDialog(QDialog):
         for rb in (self.charge_radio, self.combo_radio,
                    self.charge_ex_radio, self.turbo_radio):
             rb.setEnabled(not in_fever)
-
-    def _refresh_stats(self):
-        s = self.state
-        self.playtime_lbl.setText(_fmt_time(s.play_time))
-        self.hit_val_lbl.setText(str(s.hit_count))
-        self.force_val_lbl.setText(str(s.force_count))
-        self.click_val_lbl.setText(str(s.click_count))
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -431,8 +389,3 @@ class SettingsDialog(QDialog):
             self.state.reset_save()
             self._load_from_state()
 
-    # ── Cleanup ───────────────────────────────────────────────────────────────
-
-    def closeEvent(self, event):
-        self._refresh_timer.stop()
-        super().closeEvent(event)
