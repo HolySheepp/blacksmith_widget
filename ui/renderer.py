@@ -776,6 +776,46 @@ def _draw_hud(painter: QPainter, state: GameState):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(QRectF(bx, by, bw, bh))
 
+    # ── Fever 充能條（砧頭底部，anvil 之後繪製，不被金屬塊蓋住）─────────────
+    if (state.turbo_mode and state.fever_cooldown_timer > 0
+            and getattr(state, 'anvil_v2', True)):
+        cd_total = max(1.0, state.fever_cooldown_duration)
+        prog     = 1.0 - state.fever_cooldown_timer / cd_total   # 0 → 1
+        # 顏色：暗紅 → 橙 → 橙金
+        r = min(255, int(110 + prog * 145))
+        g = min(255, int(28  + prog * 162))
+        b = 0
+        # 脈動速度隨充能加快
+        pulse_spd = 2.2 + prog * 3.5
+        pulse     = 0.82 + 0.18 * abs(math.sin(state.play_time * pulse_spd))
+        base_alpha = int((50 + prog * 185) * pulse)
+        # 位置：砧頭梯形底邊（_V2_BL_X → _V2_BR_X，y = _V2_FACE_BOT_Y）
+        bar_left   = float(_V2_BL_X)
+        bar_top    = float(_V2_FACE_BOT_Y) + 1.0
+        full_w     = float(_V2_BR_X - _V2_BL_X)   # ≈ 160 px
+        bar_w      = full_w * prog
+        bar_h      = 4.0
+        painter.setPen(Qt.NoPen)
+        # 柔光暈
+        if prog > 0.01:
+            painter.setBrush(QBrush(QColor(r, g, b, int((10 + prog * 40) * pulse))))
+            painter.drawRoundedRect(
+                QRectF(bar_left - 2, bar_top - 4, bar_w + 4, bar_h + 8), 4, 4
+            )
+        # 主條
+        if bar_w > 0.5:
+            painter.setBrush(QBrush(QColor(r, g, b, base_alpha)))
+            painter.drawRoundedRect(QRectF(bar_left, bar_top, bar_w, bar_h), 2, 2)
+            # 亮白前緣
+            if bar_w > 6:
+                painter.setBrush(QBrush(QColor(
+                    min(255, r + 55), min(255, g + 65), 60,
+                    min(255, int(base_alpha * 1.5)),
+                )))
+                painter.drawRoundedRect(
+                    QRectF(bar_left + bar_w - 5, bar_top, 5, bar_h), 2, 2
+                )
+
     # Turbo / Fever overlay drawn in _draw_turbo_overlay (before anvil) so the
     # anvil always renders on top of the fever text.
 
@@ -802,44 +842,7 @@ def _draw_turbo_overlay(painter: QPainter, state: GameState):
         painter.drawText(QPointF(tx, ty), fever_text)
 
     elif state.fever_cooldown_timer > 0:
-        # 充能進度條：從砧面左緣向右延伸，代替"冷卻中"文字
-        cd_total = max(1.0, state.fever_cooldown_duration)
-        prog     = 1.0 - state.fever_cooldown_timer / cd_total      # 0 → 1
-        # 顏色：暗紅 → 橙 → 橙金（隨進度升溫）
-        r = min(255, int(110 + prog * 145))
-        g = min(255, int(28  + prog * 162))
-        b = 0
-        # 脈動速度隨充能加快，製造「能量湧動」感
-        pulse_spd = 2.2 + prog * 3.5
-        pulse     = 0.82 + 0.18 * abs(math.sin(state.play_time * pulse_spd))
-        base_alpha = int((45 + prog * 185) * pulse)
-
-        bar_left = float(_V2_TL_X)
-        bar_top  = float(FACE_TOP) - 5.5
-        bar_w    = float(_V2_TR_X - _V2_TL_X) * prog
-        bar_h    = 4.0
-
-        painter.setPen(Qt.NoPen)
-        # 柔光暈（條後方較寬較淡的光）
-        if prog > 0.01:
-            glow_a = int((12 + prog * 45) * pulse)
-            painter.setBrush(QBrush(QColor(r, g, b, glow_a)))
-            painter.drawRoundedRect(
-                QRectF(bar_left - 2, bar_top - 5, bar_w + 4, bar_h + 10), 4, 4
-            )
-        # 主條
-        if bar_w > 0.5:
-            painter.setBrush(QBrush(QColor(r, g, b, base_alpha)))
-            painter.drawRoundedRect(QRectF(bar_left, bar_top, bar_w, bar_h), 2, 2)
-            # 亮白前緣（充能前沿光點）
-            if bar_w > 6:
-                painter.setBrush(QBrush(QColor(
-                    min(255, r + 55), min(255, g + 65), 60,
-                    min(255, int(base_alpha * 1.5)),
-                )))
-                painter.drawRoundedRect(
-                    QRectF(bar_left + bar_w - 5, bar_top, 5, bar_h), 2, 2
-                )
+        pass   # 充能條改在 _draw_hud 中繪製（anvil 之後，避免被金屬塊蓋住）
 
     elif state.consecutive_full_charge > 0:
         filled  = "★" * state.consecutive_full_charge

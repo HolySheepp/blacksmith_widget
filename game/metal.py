@@ -14,17 +14,17 @@ import random
 
 METAL_TYPES = [
     # hot_color = 剛生成時（高溫），cold_color = 鍛造完成時（冷卻）
-    # 熱色各異確保玩家在剛生成時即能辨識金屬種類
+    # 熱色五種特意拉開：極暗紅 / 銅棕 / 亮橙紅 / 琥珀黃橙 / 金黃，讓玩家一眼辨識
     {"name": "破銅", "number": 1, "quality_max":  10, "weight": 40,
-     "hot_color": (215, 105, 40), "cold_color": (172, 96,  48)},   # 銅棕
+     "hot_color": (208, 112, 46), "cold_color": (172,  96,  48)},  # 銅棕（G偏高→偏棕）
     {"name": "爛鐵", "number": 2, "quality_max":  20, "weight": 30,
-     "hot_color": (192,  48, 10), "cold_color": ( 85, 82,  88)},   # 暗灰
+     "hot_color": (155,  30,  5), "cold_color": ( 85,  82,  88)},  # 極暗暗紅（最低品質）
     {"name": "鐵",   "number": 3, "quality_max":  40, "weight": 20,
-     "hot_color": (235,  72, 15), "cold_color": (118, 120, 130)},  # 中灰
+     "hot_color": (252,  88, 10), "cold_color": (118, 120, 130)},  # 純亮橙紅（基準）
     {"name": "鋼",   "number": 4, "quality_max":  70, "weight":  7,
-     "hot_color": (205,  88, 25), "cold_color": ( 92, 110, 148)},  # 鋼藍灰
+     "hot_color": (240, 140, 18), "cold_color": ( 92, 110, 148)},  # 琥珀黃橙（明顯偏黃）
     {"name": "精金", "number": 5, "quality_max": 100, "weight":  3,
-     "hot_color": (255, 215, 55), "cold_color": (228, 196,  90)},  # 金黃
+     "hot_color": (255, 218, 52), "cold_color": (228, 196,  90)},  # 金黃（最明顯）
 ]
 
 # ── Visual constants ───────────────────────────────────────────────────────────
