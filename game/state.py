@@ -113,7 +113,8 @@ class GameState:
         # ── Visual effects (saved) ─────────────────────────────────────────────
         self.show_hit_numbers:   bool = bool(_sv.get("show_hit_numbers",   True))
         self.show_heat_accum:    bool = bool(_sv.get("show_heat_accum",    True))
-        self.show_strike_pulse:  bool = bool(_sv.get("show_strike_pulse",  True))
+        self.show_strike_pulse:  bool = bool(_sv.get("show_strike_pulse",  False))  # 預設關閉
+        self.show_metal_forge:   bool = bool(_sv.get("show_metal_forge",   True))
 
         # Hit number popups (transient)
         self.hit_numbers: list = []
@@ -162,7 +163,8 @@ class GameState:
         self.forge_counts: list = [int(_fc[i]) if i < len(_fc) else 0
                                    for i in range(len(METAL_TYPES))]
         # 恢復上次未完成的金屬塊（包含進度），否則等第一次敲擊後再生成
-        _cm_save = _sv.get("current_metal_save")
+        # 金屬鍛造關閉時跳過恢復，直接清空
+        _cm_save = _sv.get("current_metal_save") if self.show_metal_forge else None
         if _cm_save is not None:
             try:
                 _m = MetalPiece(int(_cm_save["type_idx"]))
@@ -176,7 +178,9 @@ class GameState:
                 self.metal_spawned:  bool              = False
         else:
             self.current_metal:  MetalPiece | None = None
-            self.metal_spawned:  bool              = bool(_sv.get("metal_spawned", False))
+            self.metal_spawned:  bool              = (
+                bool(_sv.get("metal_spawned", False)) if self.show_metal_forge else False
+            )
         # Last hit surface Y — updated each strike, used by renderer for sparks / flash
         self.last_hit_surface_y: float = float(FACE_TOP)
 
@@ -259,7 +263,8 @@ class GameState:
                 if m.flash_t >= 1.0:
                     m.dead = True
                     self.current_metal = None
-                    self._spawn_metal()   # immediately queue next
+                    if self.show_metal_forge:
+                        self._spawn_metal()   # immediately queue next
 
         # ── Charge auto-slam timers (lift mode) ───────────────────────────
         # Two independent triggers: hard-cap window OR inactivity gap.
@@ -372,6 +377,7 @@ class GameState:
             "show_hit_numbers":        self.show_hit_numbers,
             "show_heat_accum":         self.show_heat_accum,
             "show_strike_pulse":       self.show_strike_pulse,
+            "show_metal_forge":        self.show_metal_forge,
             "hide_anvil":              self.hide_anvil,
             "lock_position":           self.lock_position,
             "anvil_v2":                self.anvil_v2,
@@ -446,7 +452,8 @@ class GameState:
         # Visual effects toggles
         self.show_hit_numbers   = True
         self.show_heat_accum    = True
-        self.show_strike_pulse  = True
+        self.show_strike_pulse  = False
+        self.show_metal_forge   = True
         self.hit_numbers        = []
         self.heat_level         = 0.0
         self.hide_anvil         = False
@@ -692,20 +699,21 @@ class GameState:
         self._emit_sparks(hit_x, _hit_y, cnt, intensity)
 
         # ── Metal forging logic ────────────────────────────────────────────
-        if self.current_metal is not None:
-            m = self.current_metal
-            if m.complete:
-                # This strike triggers flash — count only once (flash_t guard)
-                if m.flash_t <= 0.0:
-                    m.flash_t = 0.001
-                    self.forge_counts[m.type_idx] += 1
-            elif m.spawn_t >= 1.0:
-                # Metal fully spawned — accumulate quality
-                m.add_quality(float(_metal_force))
-        elif not self.metal_spawned:
-            # Very first strike of this session → spawn first metal
-            self.metal_spawned = True
-            self._spawn_metal()
+        if self.show_metal_forge:
+            if self.current_metal is not None:
+                m = self.current_metal
+                if m.complete:
+                    # This strike triggers flash — count only once (flash_t guard)
+                    if m.flash_t <= 0.0:
+                        m.flash_t = 0.001
+                        self.forge_counts[m.type_idx] += 1
+                elif m.spawn_t >= 1.0:
+                    # Metal fully spawned — accumulate quality
+                    m.add_quality(float(_metal_force))
+            elif not self.metal_spawned:
+                # Very first strike of this session → spawn first metal
+                self.metal_spawned = True
+                self._spawn_metal()
 
         # 連打模式三角點：每次打擊推進一格（非渦輪模式）
         if self.kb_mode == "combo" and not self.turbo_mode:

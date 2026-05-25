@@ -407,6 +407,8 @@ def _draw_anvil_v2(painter: QPainter, state: GameState):
 
 def _draw_metal(painter: QPainter, state: GameState):
     """Draw the current metal piece sitting on the anvil face."""
+    if not getattr(state, 'show_metal_forge', True):
+        return
     m = getattr(state, 'current_metal', None)
     if m is None or m.dead:
         return
@@ -572,7 +574,8 @@ def _render_vcy_fast(state: GameState, cos_a: float, sin_a: float) -> float:
     face_x = state.vcx + HEAD_OFFSET * cos_a + HEAD_PERP * sin_a
     # Visual surface rises by metal thickness when metal is visible and fully spawned
     m = getattr(state, 'current_metal', None)
-    if (not state.hide_anvil and m is not None and not m.dead
+    if (getattr(state, 'show_metal_forge', True)
+            and not state.hide_anvil and m is not None and not m.dead
             and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
         visual_top = FACE_TOP - m.thickness
     else:
