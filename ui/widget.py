@@ -207,6 +207,14 @@ class BlacksmithWidget(QWidget):
 
         _wlog("[init] tray icon")
         self._setup_tray()
+
+        # 監聽螢幕設定變動（插拔螢幕、切換投影模式）——確保 widget 不會消失在畫面外
+        from PyQt5.QtWidgets import QApplication
+        _desk = QApplication.desktop()
+        _desk.screenCountChanged.connect(self._on_screen_config_changed)
+        _desk.resized.connect(self._on_screen_config_changed)
+        _wlog("[init] screen-change signals connected")
+
         _wlog("[init] __init__ complete")
 
     # ── Input listener ────────────────────────────────────────────────────────
@@ -259,6 +267,13 @@ class BlacksmithWidget(QWidget):
         if not on_any:
             geo = desktop.availableGeometry()          # primary screen
             self.move(geo.center() - self.rect().center())
+            self.raise_()
+            self.activateWindow()
+
+    def _on_screen_config_changed(self, *_):
+        """Called when screens are added/removed or resized (e.g. projection mode switch).
+        Waits 500 ms for the OS to finish reconfiguring displays, then snaps widget back."""
+        QTimer.singleShot(500, self._ensure_on_screen)
 
     def _move_to_center(self):
         """Move widget to the centre of whichever screen it currently overlaps,
