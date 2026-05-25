@@ -113,6 +113,7 @@ class GameState:
         # ── Visual effects (saved) ─────────────────────────────────────────────
         self.show_hit_numbers:   bool = bool(_sv.get("show_hit_numbers",   True))
         self.show_heat_accum:    bool = bool(_sv.get("show_heat_accum",    True))
+        self.show_strike_pulse:  bool = bool(_sv.get("show_strike_pulse",  True))
 
         # Hit number popups (transient)
         self.hit_numbers: list = []
@@ -370,6 +371,7 @@ class GameState:
             "widget_y":                self.widget_y,
             "show_hit_numbers":        self.show_hit_numbers,
             "show_heat_accum":         self.show_heat_accum,
+            "show_strike_pulse":       self.show_strike_pulse,
             "hide_anvil":              self.hide_anvil,
             "lock_position":           self.lock_position,
             "anvil_v2":                self.anvil_v2,
@@ -444,6 +446,7 @@ class GameState:
         # Visual effects toggles
         self.show_hit_numbers   = True
         self.show_heat_accum    = True
+        self.show_strike_pulse  = True
         self.hit_numbers        = []
         self.heat_level         = 0.0
         self.hide_anvil         = False

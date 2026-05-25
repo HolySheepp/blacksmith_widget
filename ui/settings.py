@@ -226,10 +226,12 @@ class SettingsDialog(QDialog):
         self.fx_hit_numbers_cb = QCheckBox("打擊數字跳出")
         self.fx_heat_accum_cb  = QCheckBox("累積餘熱效果")
         self.fx_anvil_v2_cb    = QCheckBox("新式鐵砧外觀")
+        self.fx_pulse_cb       = QCheckBox("打擊脈衝效果")
 
         self.fx_hit_numbers_cb.setToolTip("打擊時在鐵砧上方顯示浮動數字")
         self.fx_heat_accum_cb.setToolTip("連續打擊會使鐵砧維持熾熱狀態較久")
         self.fx_anvil_v2_cb.setToolTip("使用簡潔的圖標風格鐵砧（關閉則恢復經典樣式）")
+        self.fx_pulse_cb.setToolTip("關閉後隱藏打擊時在鐵砧面或金屬塊上閃爍的框框")
 
         self.fx_hit_numbers_cb.toggled.connect(
             lambda v: setattr(self.state, 'show_hit_numbers', v))
@@ -237,6 +239,8 @@ class SettingsDialog(QDialog):
             lambda v: setattr(self.state, 'show_heat_accum', v))
         self.fx_anvil_v2_cb.toggled.connect(
             lambda v: setattr(self.state, 'anvil_v2', v))
+        self.fx_pulse_cb.toggled.connect(
+            lambda v: setattr(self.state, 'show_strike_pulse', v))
 
         row_fx1 = QHBoxLayout()
         row_fx1.addWidget(self.fx_hit_numbers_cb)
@@ -246,6 +250,7 @@ class SettingsDialog(QDialog):
 
         row_fx2 = QHBoxLayout()
         row_fx2.addWidget(self.fx_anvil_v2_cb)
+        row_fx2.addWidget(self.fx_pulse_cb)
         row_fx2.addStretch()
         vl.addLayout(row_fx2)
 
@@ -267,6 +272,7 @@ class SettingsDialog(QDialog):
             (self.fx_hit_numbers_cb,   'show_hit_numbers'),
             (self.fx_heat_accum_cb,    'show_heat_accum'),
             (self.fx_anvil_v2_cb,      'anvil_v2'),
+            (self.fx_pulse_cb,         'show_strike_pulse'),
         ]:
             cb.blockSignals(True)
             cb.setChecked(getattr(s, attr))

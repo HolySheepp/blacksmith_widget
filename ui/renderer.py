@@ -191,14 +191,14 @@ _MI_LINE_H  = int((_V2_FACE_BOT_Y - FACE_TOP - 12) * 0.84) # 37  豎線高度
 _MI_LINE_Y0 = _MI_CY - _MI_LINE_H // 2                     # 346  豎線頂端
 _MI_LINE_W  = 4.0                                           # px   豎線寬度
 _MI_LINE_DX = 13                                            # px   豎線間距
-_MI_CIRC_R  = int((_V2_FACE_BOT_Y - FACE_TOP - 12) * 0.37) # 16  蓄力圓半徑
+_MI_CIRC_R  = int((_V2_FACE_BOT_Y - FACE_TOP - 12) * 0.24) # 10  蓄力圓半徑（縮小）
 _MI_DOT_TR  = int((_V2_FACE_BOT_Y - FACE_TOP - 12) * 0.30) # 13  三角外接圓半徑
 _MI_DOT_R   = 4.5                                           # px   小圓點半徑
-# 三角點位：index 0=頂, 1=左下, 2=右下（逆時針順序）
+# 三角點位：index 0=頂, 1=左下, 2=右下（逆時針順序）；整體下移 2px
 _MI_DOT_POS = [
-    (_MI_CX,                             _MI_CY - _MI_DOT_TR),
-    (_MI_CX - int(_MI_DOT_TR * 0.866),   _MI_CY + (_MI_DOT_TR + 1) // 2),
-    (_MI_CX + int(_MI_DOT_TR * 0.866),   _MI_CY + (_MI_DOT_TR + 1) // 2),
+    (_MI_CX,                             _MI_CY - _MI_DOT_TR + 2),
+    (_MI_CX - int(_MI_DOT_TR * 0.866),   _MI_CY + (_MI_DOT_TR + 1) // 2 + 2),
+    (_MI_CX + int(_MI_DOT_TR * 0.866),   _MI_CY + (_MI_DOT_TR + 1) // 2 + 2),
 ]
 
 _POLY_V2_FACE_BODY = QPolygonF([
@@ -615,6 +615,8 @@ def _draw_sparks(painter: QPainter, state: GameState):
 # ── Strike flash ──────────────────────────────────────────────────────────────
 
 def _draw_flash(painter: QPainter, state: GameState):
+    if not getattr(state, 'show_strike_pulse', True):
+        return
     sf = state.strike_flash
     if sf < 0.004:
         return
@@ -812,35 +814,45 @@ def _draw_turbo_lines(painter: QPainter, state: GameState,
             painter.drawRoundedRect(QRectF(lx - lw/2, y0, lw, ht), 1.5, 1.5)
 
     elif state.fever_cooldown_timer > 0:
-        # 充能中：深色底 + 從底部填充橙金
+        # 充能中：深色底 + 岩漿由底部湧上（深橙紅→亮橙黃）
         cd_total = max(1.0, state.fever_cooldown_duration)
         prog     = 1.0 - state.fever_cooldown_timer / cd_total
         fill_h   = ht * prog
-        fill_r   = min(255, int(110 + prog * 145))
-        fill_g   = min(255, int(28  + prog * 162))
-        pulse    = 0.82 + 0.18 * abs(math.sin(t * (2.2 + prog * 3.5)))
-        fill_a   = int((80 + prog * 170) * pulse)
+        fill_r   = min(255, int(200 + prog * 55))   # 200→255  始終熾熱
+        fill_g   = min(255, int(45  + prog * 155))  # 45→200   漸趨橙黃
+        # 岩漿內部亮芯（越滿越亮）
+        pulse    = 0.80 + 0.20 * abs(math.sin(t * (2.5 + prog * 4.0)))
+        fill_a   = int((160 + prog * 90) * pulse)   # 遠比之前亮
         for lx in line_xs:
             rx = lx - lw / 2
+            # 深色槽底
             painter.setBrush(QBrush(QColor(20, 18, 18, 215)))
             painter.drawRoundedRect(QRectF(rx, y0, lw, ht), 1.5, 1.5)
             if fill_h > 0.5:
+                # 岩漿填充層
                 painter.setBrush(QBrush(QColor(fill_r, fill_g, 0, fill_a)))
                 painter.drawRoundedRect(
                     QRectF(rx, y0 + ht - fill_h, lw, fill_h), 1.5, 1.5
                 )
+                # 頂端亮邊（模擬熾熱液面）
+                edge_h = max(1.5, lw * 0.5)
+                painter.setBrush(QBrush(QColor(255, min(255, fill_g + 60), 40,
+                                               min(255, int(fill_a * 1.25)))))
+                painter.drawRoundedRect(
+                    QRectF(rx, y0 + ht - fill_h, lw, edge_h), 1.5, 1.5
+                )
             if glow > 0.05:   # 打擊閃光
-                painter.setBrush(QBrush(QColor(sr, sg, sb, int(glow * 120))))
+                painter.setBrush(QBrush(QColor(sr, sg, sb, int(glow * 150))))
                 painter.drawRoundedRect(QRectF(rx, y0, lw, ht), 1.5, 1.5)
 
     else:
-        # 充能滿（待機）：持續亮金橙，配合打擊閃爍
-        pulse = 0.72 + 0.28 * abs(math.sin(t * 1.8))
+        # 充能滿（待機）：明顯呼吸金光，振幅大、頻率略快
+        pulse = 0.42 + 0.58 * abs(math.sin(t * 2.5))   # 42%→100%，非常明顯
         for lx in line_xs:
-            fr = min(255, int(200 + glow * max(0, sr - 200)))
-            fg = min(255, int(125 + glow * max(0, sg - 125)))
-            fb = min(255,        int(glow * sb))
-            fa = int((152 + glow * 88) * pulse)
+            fr = min(255, int(230 + glow * max(0, sr - 230)))
+            fg = min(255, int(150 + glow * max(0, sg - 150)))
+            fb = min(255, int( 20 + glow * max(0, sb -  20)))
+            fa = int((190 + glow * 65) * pulse)
             painter.setBrush(QBrush(QColor(fr, fg, fb, fa)))
             painter.drawRoundedRect(QRectF(lx - lw/2, y0, lw, ht), 1.5, 1.5)
 
@@ -869,22 +881,32 @@ def _draw_charge_circle(painter: QPainter, state: GameState,
 
 def _draw_combo_dots(painter: QPainter, state: GameState,
                      glow: float, sr: int, sg: int, sb: int):
-    """連打模式：三個小圓構成正三角，逆時針輪流亮起。"""
+    """連打模式：三個小圓構成正三角，逆時針輪流亮起（藍色）。"""
     painter.setPen(Qt.NoPen)
     active = getattr(state, 'combo_dot_idx', 0) % 3
     for i, (dx, dy) in enumerate(_MI_DOT_POS):
         if i == active:
-            # 亮點：暖琥珀色 + 打擊閃光
-            r = min(255, int(200 + glow * max(0, sr - 200)))
-            g = min(255, int(115 + glow * max(0, sg - 115)))
-            b = min(255, int( 32 + glow * max(0, sb -  32)))
-            a = 235
+            # 亮點：鮮藍色底，打擊後短暫混入 strike_color
+            r = min(255, int( 70 + glow * max(0, sr -  70)))
+            g = min(255, int(160 + glow * max(0, sg - 160)))
+            b = min(255, int(255 + glow * max(0, sb - 255)))
+            a = min(255, int(240 + glow * 15))
+            # 打擊時畫一圈明亮暈光
+            if glow > 0.04:
+                glow_r = _MI_DOT_R + 3.0 + glow * 5.0
+                painter.setBrush(QBrush(QColor(
+                    min(255, int(80  + glow * max(0, sr - 80))),
+                    min(255, int(170 + glow * max(0, sg - 170))),
+                    255,
+                    int(glow * 200),
+                )))
+                painter.drawEllipse(QPointF(dx, dy), glow_r, glow_r)
         else:
             # 暗點：近黑，打擊時微閃
-            r = min(255, int(22 + glow * (sr - 22) * 0.35))
-            g = min(255, int(22 + glow * (sg - 22) * 0.35))
+            r = min(255, int(18 + glow * (sr - 18) * 0.30))
+            g = min(255, int(18 + glow * (sg - 18) * 0.30))
             b = min(255, int(22 + glow * (sb - 22) * 0.35))
-            a = 205
+            a = 210
         painter.setBrush(QBrush(QColor(r, g, b, a)))
         painter.drawEllipse(QPointF(dx, dy), _MI_DOT_R, _MI_DOT_R)
 
