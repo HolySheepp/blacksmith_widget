@@ -183,6 +183,24 @@ _V2_BASE_SHIFT = 8   # base shifted right (px)
 # Metal width: starts narrow, expands to full anvil face width as quality increases
 _METAL_W_START = 60.0
 
+# ── Mode indicator geometry (V2 face-body centre) ─────────────────────────────
+# 面體：top y = FACE_TOP+12 = 342，bottom y = _V2_FACE_BOT_Y = 387，height = 45
+_MI_CX      = AX                                            # 390  砧中心 x
+_MI_CY      = (_V2_FACE_BOT_Y + FACE_TOP + 12) // 2        # 364  面體中心 y
+_MI_LINE_H  = int((_V2_FACE_BOT_Y - FACE_TOP - 12) * 0.84) # 37  豎線高度
+_MI_LINE_Y0 = _MI_CY - _MI_LINE_H // 2                     # 346  豎線頂端
+_MI_LINE_W  = 4.0                                           # px   豎線寬度
+_MI_LINE_DX = 13                                            # px   豎線間距
+_MI_CIRC_R  = int((_V2_FACE_BOT_Y - FACE_TOP - 12) * 0.37) # 16  蓄力圓半徑
+_MI_DOT_TR  = int((_V2_FACE_BOT_Y - FACE_TOP - 12) * 0.30) # 13  三角外接圓半徑
+_MI_DOT_R   = 4.5                                           # px   小圓點半徑
+# 三角點位：index 0=頂, 1=左下, 2=右下（逆時針順序）
+_MI_DOT_POS = [
+    (_MI_CX,                             _MI_CY - _MI_DOT_TR),
+    (_MI_CX - int(_MI_DOT_TR * 0.866),   _MI_CY + (_MI_DOT_TR + 1) // 2),
+    (_MI_CX + int(_MI_DOT_TR * 0.866),   _MI_CY + (_MI_DOT_TR + 1) // 2),
+]
+
 _POLY_V2_FACE_BODY = QPolygonF([
     QPointF(_V2_TL_X, FACE_TOP + 12),   # 293, 342
     QPointF(_V2_TR_X, FACE_TOP + 12),   # 516, 342
@@ -234,6 +252,7 @@ def draw_frame(painter: QPainter, state: GameState):
         else:
             _draw_anvil(painter, state)
         _draw_metal(painter, state)
+        _draw_anvil_mode_indicator(painter, state)
     _draw_sparks(painter, state)
     _draw_hammer(painter, state, cos_a, sin_a)
     if not state.hide_anvil:
@@ -726,33 +745,6 @@ def _draw_hud(painter: QPainter, state: GameState):
                 painter.setPen(QPen(col))
                 painter.drawText(QPointF(tx, game_y), text)
 
-    # ── Mode indicator ────────────────────────────────────────────────────
-    if state.turbo_mode:
-        mode_text = "⚡"
-        if state.fever_active:
-            mode_col = _CHUD_FEVER
-        elif state.fever_cooldown_timer > 0:
-            mode_col = _CHUD_COOL
-        else:
-            mode_col = _CHUD_TURBO
-    else:
-        if state.kb_mode == "charge":
-            mode_text = "✪"
-        elif state.kb_mode == "charge_legacy":
-            mode_text = "◇"
-        else:
-            mode_text = "❉"
-        mode_col = _CHUD_ACTIVE if state.kb_active else _CHUD_IDLE
-
-    painter.setFont(_FONT_MODE)
-    fm_mode = painter.fontMetrics()
-    _mode_x = (AX + (_V2_TR_X if getattr(state, 'anvil_v2', True) else FACE_R)) / 2
-    painter.setPen(QPen(mode_col))
-    painter.drawText(
-        QPointF(_mode_x - fm_mode.horizontalAdvance(mode_text) / 2, 447),
-        mode_text,
-    )
-
     # ── Charge bar ────────────────────────────────────────────────────────
     if state.show_charge_bar and state.kb_mode in ("charge", "charge_legacy") and state.kb_active:
         cf = state.typing_charge / max(1, state.typing_max_charge)
@@ -776,48 +768,125 @@ def _draw_hud(painter: QPainter, state: GameState):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(QRectF(bx, by, bw, bh))
 
-    # ── Fever 充能條（砧頭底部，anvil 之後繪製，不被金屬塊蓋住）─────────────
-    if (state.turbo_mode and state.fever_cooldown_timer > 0
-            and getattr(state, 'anvil_v2', True)):
-        cd_total = max(1.0, state.fever_cooldown_duration)
-        prog     = 1.0 - state.fever_cooldown_timer / cd_total   # 0 → 1
-        # 顏色：暗紅 → 橙 → 橙金
-        r = min(255, int(110 + prog * 145))
-        g = min(255, int(28  + prog * 162))
-        b = 0
-        # 脈動速度隨充能加快
-        pulse_spd = 2.2 + prog * 3.5
-        pulse     = 0.82 + 0.18 * abs(math.sin(state.play_time * pulse_spd))
-        base_alpha = int((50 + prog * 185) * pulse)
-        # 位置：砧頭梯形底邊（_V2_BL_X → _V2_BR_X，y = _V2_FACE_BOT_Y）
-        bar_left   = float(_V2_BL_X)
-        bar_top    = float(_V2_FACE_BOT_Y) + 1.0
-        full_w     = float(_V2_BR_X - _V2_BL_X)   # ≈ 160 px
-        bar_w      = full_w * prog
-        bar_h      = 4.0
-        painter.setPen(Qt.NoPen)
-        # 柔光暈
-        if prog > 0.01:
-            painter.setBrush(QBrush(QColor(r, g, b, int((10 + prog * 40) * pulse))))
-            painter.drawRoundedRect(
-                QRectF(bar_left - 2, bar_top - 4, bar_w + 4, bar_h + 8), 4, 4
-            )
-        # 主條
-        if bar_w > 0.5:
-            painter.setBrush(QBrush(QColor(r, g, b, base_alpha)))
-            painter.drawRoundedRect(QRectF(bar_left, bar_top, bar_w, bar_h), 2, 2)
-            # 亮白前緣
-            if bar_w > 6:
-                painter.setBrush(QBrush(QColor(
-                    min(255, r + 55), min(255, g + 65), 60,
-                    min(255, int(base_alpha * 1.5)),
-                )))
-                painter.drawRoundedRect(
-                    QRectF(bar_left + bar_w - 5, bar_top, 5, bar_h), 2, 2
-                )
 
-    # Turbo / Fever overlay drawn in _draw_turbo_overlay (before anvil) so the
-    # anvil always renders on top of the fever text.
+
+# ── Anvil mode indicators (drawn AFTER metal, ON TOP of anvil face) ──────────
+
+def _draw_anvil_mode_indicator(painter: QPainter, state: GameState):
+    """根據目前模式在砧頭面體中央繪製指示器（僅 V2 砧）。"""
+    if not getattr(state, 'anvil_v2', True):
+        return
+    glow = state.anvil_glow
+    sr, sg, sb = state.strike_color
+    if state.turbo_mode:
+        _draw_turbo_lines(painter, state, glow, sr, sg, sb)
+    elif state.kb_mode in ("charge", "charge_legacy"):
+        _draw_charge_circle(painter, state, glow, sr, sg, sb)
+    else:
+        _draw_combo_dots(painter, state, glow, sr, sg, sb)
+
+
+def _draw_turbo_lines(painter: QPainter, state: GameState,
+                      glow: float, sr: int, sg: int, sb: int):
+    """渦輪模式：三條豎線作為充能槽。
+    冷卻中 → 從底部填充；充能完畢 → 持續亮金；Fever → 脈動粉紫；每次打擊短暫閃爍。"""
+    painter.setPen(Qt.NoPen)
+    lw   = _MI_LINE_W
+    y0   = float(_MI_LINE_Y0)
+    ht   = float(_MI_LINE_H)
+    t    = state.play_time
+    line_xs = (_MI_CX - _MI_LINE_DX, _MI_CX, _MI_CX + _MI_LINE_DX)
+
+    if state.fever_active:
+        # Fever：脈動粉紫
+        pulse = 0.55 + 0.45 * abs(math.sin(t * 5.0))
+        for lx in line_xs:
+            fr = min(255, int(255 * min(1.0, pulse * 1.1)))
+            fg = int(55  * pulse)
+            fb = min(255, int(220 * pulse))
+            # 打擊閃光疊加
+            fr = min(255, int(fr + glow * max(0, sr - fr)))
+            fg = min(255, int(fg + glow * max(0, sg - fg)))
+            fb = min(255, int(fb + glow * max(0, sb - fb)))
+            painter.setBrush(QBrush(QColor(fr, fg, fb, int(200 * pulse))))
+            painter.drawRoundedRect(QRectF(lx - lw/2, y0, lw, ht), 1.5, 1.5)
+
+    elif state.fever_cooldown_timer > 0:
+        # 充能中：深色底 + 從底部填充橙金
+        cd_total = max(1.0, state.fever_cooldown_duration)
+        prog     = 1.0 - state.fever_cooldown_timer / cd_total
+        fill_h   = ht * prog
+        fill_r   = min(255, int(110 + prog * 145))
+        fill_g   = min(255, int(28  + prog * 162))
+        pulse    = 0.82 + 0.18 * abs(math.sin(t * (2.2 + prog * 3.5)))
+        fill_a   = int((80 + prog * 170) * pulse)
+        for lx in line_xs:
+            rx = lx - lw / 2
+            painter.setBrush(QBrush(QColor(20, 18, 18, 215)))
+            painter.drawRoundedRect(QRectF(rx, y0, lw, ht), 1.5, 1.5)
+            if fill_h > 0.5:
+                painter.setBrush(QBrush(QColor(fill_r, fill_g, 0, fill_a)))
+                painter.drawRoundedRect(
+                    QRectF(rx, y0 + ht - fill_h, lw, fill_h), 1.5, 1.5
+                )
+            if glow > 0.05:   # 打擊閃光
+                painter.setBrush(QBrush(QColor(sr, sg, sb, int(glow * 120))))
+                painter.drawRoundedRect(QRectF(rx, y0, lw, ht), 1.5, 1.5)
+
+    else:
+        # 充能滿（待機）：持續亮金橙，配合打擊閃爍
+        pulse = 0.72 + 0.28 * abs(math.sin(t * 1.8))
+        for lx in line_xs:
+            fr = min(255, int(200 + glow * max(0, sr - 200)))
+            fg = min(255, int(125 + glow * max(0, sg - 125)))
+            fb = min(255,        int(glow * sb))
+            fa = int((152 + glow * 88) * pulse)
+            painter.setBrush(QBrush(QColor(fr, fg, fb, fa)))
+            painter.drawRoundedRect(QRectF(lx - lw/2, y0, lw, ht), 1.5, 1.5)
+
+
+def _draw_charge_circle(painter: QPainter, state: GameState,
+                        glow: float, sr: int, sg: int, sb: int):
+    """蓄力模式：砧頭中央圓形凹槽，打擊後依段數閃出對應顏色的光。"""
+    cx, cy = float(_MI_CX), float(_MI_CY)
+    rc     = float(_MI_CIRC_R)
+    painter.setPen(Qt.NoPen)
+    # 深色凹槽底
+    painter.setBrush(QBrush(QColor(12, 12, 12, 225)))
+    painter.drawEllipse(QPointF(cx, cy), rc, rc)
+    # 打擊後閃光
+    if glow > 0.01:
+        painter.setBrush(QBrush(QColor(sr, sg, sb, int(glow * 215))))
+        painter.drawEllipse(QPointF(cx, cy), rc, rc)
+    # 凹槽輪廓
+    rim = QPen(QColor(72, 68, 64, 185))
+    rim.setWidthF(1.5)
+    painter.setPen(rim)
+    painter.setBrush(Qt.NoBrush)
+    painter.drawEllipse(QPointF(cx, cy), rc + 0.75, rc + 0.75)
+    painter.setPen(Qt.NoPen)
+
+
+def _draw_combo_dots(painter: QPainter, state: GameState,
+                     glow: float, sr: int, sg: int, sb: int):
+    """連打模式：三個小圓構成正三角，逆時針輪流亮起。"""
+    painter.setPen(Qt.NoPen)
+    active = getattr(state, 'combo_dot_idx', 0) % 3
+    for i, (dx, dy) in enumerate(_MI_DOT_POS):
+        if i == active:
+            # 亮點：暖琥珀色 + 打擊閃光
+            r = min(255, int(200 + glow * max(0, sr - 200)))
+            g = min(255, int(115 + glow * max(0, sg - 115)))
+            b = min(255, int( 32 + glow * max(0, sb -  32)))
+            a = 235
+        else:
+            # 暗點：近黑，打擊時微閃
+            r = min(255, int(22 + glow * (sr - 22) * 0.35))
+            g = min(255, int(22 + glow * (sg - 22) * 0.35))
+            b = min(255, int(22 + glow * (sb - 22) * 0.35))
+            a = 205
+        painter.setBrush(QBrush(QColor(r, g, b, a)))
+        painter.drawEllipse(QPointF(dx, dy), _MI_DOT_R, _MI_DOT_R)
 
 
 # ── Turbo / Fever overlay (drawn BEFORE anvil so anvil stays on top) ─────────

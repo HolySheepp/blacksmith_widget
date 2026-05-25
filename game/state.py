@@ -153,6 +153,9 @@ class GameState:
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
 
+        # Transient: 連打模式三角點指示器（暫態，不存檔）
+        self.combo_dot_idx: int = 0
+
         # ── Metal forging system ───────────────────────────────────────────
         _fc = _sv.get("forge_counts", [])
         self.forge_counts: list = [int(_fc[i]) if i < len(_fc) else 0
@@ -457,6 +460,7 @@ class GameState:
         self.crit_rate  = 0.05
         self.crit_mult  = 3.0
         self.last_crit  = False
+        self.combo_dot_idx = 0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -699,6 +703,10 @@ class GameState:
             # Very first strike of this session → spawn first metal
             self.metal_spawned = True
             self._spawn_metal()
+
+        # 連打模式三角點：每次打擊推進一格（非渦輪模式）
+        if self.kb_mode == "combo" and not self.turbo_mode:
+            self.combo_dot_idx = (self.combo_dot_idx + 1) % 3
 
         return (intensity, charge_mult)
 
