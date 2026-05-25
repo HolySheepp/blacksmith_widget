@@ -154,12 +154,25 @@ class GameState:
         self.mouse_on_widget: bool = False
 
         # ── Metal forging system ───────────────────────────────────────────
-        # forge_counts is saved; metal_spawned and current_metal are transient.
         _fc = _sv.get("forge_counts", [])
         self.forge_counts: list = [int(_fc[i]) if i < len(_fc) else 0
                                    for i in range(len(METAL_TYPES))]
-        self.metal_spawned:  bool                  = False   # first strike done?
-        self.current_metal:  MetalPiece | None     = None
+        # 恢復上次未完成的金屬塊（包含進度），否則等第一次敲擊後再生成
+        _cm_save = _sv.get("current_metal_save")
+        if _cm_save is not None:
+            try:
+                _m = MetalPiece(int(_cm_save["type_idx"]))
+                _m.quality  = float(_cm_save.get("quality", 0.0))
+                _m.spawn_t  = 1.0    # 視為已完整生成，跳過入場動畫
+                _m.complete = bool(_cm_save.get("complete", False))
+                self.current_metal:  MetalPiece | None = _m
+                self.metal_spawned:  bool              = True
+            except Exception:
+                self.current_metal:  MetalPiece | None = None
+                self.metal_spawned:  bool              = False
+        else:
+            self.current_metal:  MetalPiece | None = None
+            self.metal_spawned:  bool              = bool(_sv.get("metal_spawned", False))
         # Last hit surface Y — updated each strike, used by renderer for sparks / flash
         self.last_hit_surface_y: float = float(FACE_TOP)
 
@@ -359,8 +372,23 @@ class GameState:
             "anvil_v2":                self.anvil_v2,
             "always_on_top":           self.always_on_top,
             "forge_counts":            list(self.forge_counts),
+            "metal_spawned":           self.metal_spawned,
+            "current_metal_save":      self._metal_to_save(),
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,
+        }
+
+    def _metal_to_save(self) -> dict | None:
+        """將目前金屬塊序列化為可存檔的 dict；不存在或正在閃爍消失則回傳 None。"""
+        m = self.current_metal
+        if (m is None or m.dead
+                or m.spawn_t < 1.0    # 入場動畫未完成
+                or m.flash_t > 0.0):  # 完成閃爍動畫中
+            return None
+        return {
+            "type_idx": m.type_idx,
+            "quality":  m.quality,
+            "complete": m.complete,
         }
 
     def reset_save(self):
