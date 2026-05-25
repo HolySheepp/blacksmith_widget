@@ -24,6 +24,7 @@ _DEF_FEV_THRESH = 2
 _DEF_FEV_DUR    = 20
 _DEF_FEV_CD     = 75
 _DEF_EX_LIFT    = 500   # default charge-EX lift (game units / s)
+_DEF_WINDOW_MS  = 520   # default charge window duration (ms)
 
 
 class DevToolsDialog(QDialog):
@@ -109,6 +110,14 @@ class DevToolsDialog(QDialog):
         lift_row.addWidget(self.lift_slider)
         lift_row.addWidget(self.lift_lbl)
         cl.addLayout(lift_row)
+
+        # 蓄力窗口時長
+        window_row = QHBoxLayout()
+        window_row.addWidget(QLabel(f"蓄力窗口（ms，默認 {_DEF_WINDOW_MS}）:"))
+        self.window_edit = QLineEdit()
+        self.window_edit.setToolTip("蓄力模式的計時窗口長度（毫秒），窗口結束時鐵錘自動下砸")
+        window_row.addWidget(self.window_edit)
+        cl.addLayout(window_row)
 
         apply_charge = QPushButton("套用蓄力設定")
         apply_charge.clicked.connect(self._apply_charge)
@@ -211,6 +220,7 @@ class DevToolsDialog(QDialog):
         self.lift_slider.setValue(lift_val)
         self.lift_slider.blockSignals(False)
         self.lift_lbl.setText(str(lift_val * 10))
+        self.window_edit.setText(str(int(s.typing_base_ms)))
         self.fever_thresh_slider.setValue(s.fever_threshold)
         self.fever_thresh_lbl.setText(str(s.fever_threshold))
         self.fever_dur_edit.setText(str(int(s.fever_duration)))
@@ -233,6 +243,11 @@ class DevToolsDialog(QDialog):
     def _apply_charge(self):
         self.state.typing_max_charge = self.charge_slider.value()
         self.state.charge_ex_lift    = self.lift_slider.value() * 10.0
+        try:
+            window = float(self.window_edit.text())
+            self.state.typing_base_ms = max(50.0, min(5000.0, window))
+        except ValueError:
+            pass
 
     def _apply_fever_settings(self):
         self.state.fever_threshold = self.fever_thresh_slider.value()

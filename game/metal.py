@@ -13,11 +13,18 @@ import random
 # ── Metal type definitions ─────────────────────────────────────────────────────
 
 METAL_TYPES = [
-    {"name": "破銅", "number": 1, "quality_max":  10, "weight": 40},
-    {"name": "爛鐵", "number": 2, "quality_max":  20, "weight": 30},
-    {"name": "鐵",   "number": 3, "quality_max":  40, "weight": 20},
-    {"name": "鋼",   "number": 4, "quality_max":  70, "weight":  7},
-    {"name": "精金", "number": 5, "quality_max": 100, "weight":  3},
+    # hot_color = 剛生成時（高溫），cold_color = 鍛造完成時（冷卻）
+    # 熱色各異確保玩家在剛生成時即能辨識金屬種類
+    {"name": "破銅", "number": 1, "quality_max":  10, "weight": 40,
+     "hot_color": (215, 105, 40), "cold_color": (172, 96,  48)},   # 銅棕
+    {"name": "爛鐵", "number": 2, "quality_max":  20, "weight": 30,
+     "hot_color": (192,  48, 10), "cold_color": ( 85, 82,  88)},   # 暗灰
+    {"name": "鐵",   "number": 3, "quality_max":  40, "weight": 20,
+     "hot_color": (235,  72, 15), "cold_color": (118, 120, 130)},  # 中灰
+    {"name": "鋼",   "number": 4, "quality_max":  70, "weight":  7,
+     "hot_color": (205,  88, 25), "cold_color": ( 92, 110, 148)},  # 鋼藍灰
+    {"name": "精金", "number": 5, "quality_max": 100, "weight":  3,
+     "hot_color": (255, 215, 55), "cold_color": (228, 196,  90)},  # 金黃
 ]
 
 # ── Visual constants ───────────────────────────────────────────────────────────
@@ -25,10 +32,6 @@ METAL_TYPES = [
 # Thickness (px, game space) at each of the 5 forging stages
 STAGE_THICKNESS = [30, 26, 22, 18, 14]
 COMPLETE_THICKNESS = 10          # thickness when quality bar is full
-
-# Hot-metal colour: dark red-orange → bright yellow as quality fills
-_COLOR_START = (200,  50,  10)
-_COLOR_END   = (255, 200,  60)
 
 # ── Animation durations (seconds) ─────────────────────────────────────────────
 
@@ -86,8 +89,9 @@ class MetalPiece:
 
     @property
     def color(self) -> tuple:
-        r1, g1, b1 = _COLOR_START
-        r2, g2, b2 = _COLOR_END
+        meta       = METAL_TYPES[self.type_idx]
+        r1, g1, b1 = meta["hot_color"]
+        r2, g2, b2 = meta["cold_color"]
         t = self.ratio
         return (int(r1 + t * (r2 - r1)),
                 int(g1 + t * (g2 - g1)),

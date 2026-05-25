@@ -434,20 +434,7 @@ def _draw_metal(painter: QPainter, state: GameState):
         min(255, r + 40), min(255, g + 40), min(255, b + 40), alpha)))
     painter.drawRoundedRect(QRectF(mx + 2, my, metal_w - 4, hl_h), 2, 2)
 
-    # Number label — centred in the metal rect
-    if thickness >= 12 and alpha > 30:
-        painter.setFont(_FONT_METAL_NUM)
-        fm  = painter.fontMetrics()
-        txt = str(m.number)
-        tx  = AX - fm.horizontalAdvance(txt) / 2
-        ty  = my + (thickness + fm.ascent() - fm.descent()) / 2
-        # Shadow
-        painter.setPen(QPen(QColor(0, 0, 0, min(alpha, 160))))
-        painter.drawText(QPointF(tx + 1, ty + 1), txt)
-        # Text
-        painter.setPen(QPen(QColor(255, 255, 255, alpha)))
-        painter.drawText(QPointF(tx, ty), txt)
-        painter.setPen(Qt.NoPen)
+    # 數字標籤已移除；金屬類型改以顏色區分（熱色→冷色插值）
 
 
 # ── Hammer ────────────────────────────────────────────────────────────────────
@@ -667,6 +654,27 @@ def _draw_hit_numbers(painter: QPainter, state: GameState):
         fm = painter.fontMetrics()
         tx = hn["x"] - fm.horizontalAdvance(text) / 2
         ty = hn["y"]
+
+        # ── 暴擊放射光芒（在文字之前繪製，文字壓在上面）─────────────────
+        if is_crit:
+            t_burst = max(0.0, 1.0 - t * 2.5)   # 前 40% 時間內有光芒
+            if t_burst > 0.02:
+                burst_alpha = int(alpha * t_burst * 0.75)
+                star_cx = hn["x"]
+                star_cy = ty - fm.ascent() * 0.45
+                ray_pen = QPen(QColor(255, 230, 50, burst_alpha))
+                ray_pen.setWidthF(1.5)
+                painter.setPen(ray_pen)
+                for i in range(8):
+                    angle  = i * (math.pi / 4)
+                    rl     = 22 if i % 2 == 0 else 13   # 長短交替
+                    ca, sa = math.cos(angle), math.sin(angle)
+                    painter.drawLine(
+                        QPointF(star_cx + ca * 16,        star_cy + sa * 16),
+                        QPointF(star_cx + ca * (16 + rl), star_cy + sa * (16 + rl)),
+                    )
+                painter.setPen(Qt.NoPen)
+
         # Shadow (slightly thicker for crit)
         painter.setPen(QPen(QColor(0, 0, 0, min(255, alpha))))
         shadow_ofs = ((-2, 0), (2, 0), (0, -2), (0, 2)) if is_crit else _SHADOW_OFS
@@ -794,11 +802,44 @@ def _draw_turbo_overlay(painter: QPainter, state: GameState):
         painter.drawText(QPointF(tx, ty), fever_text)
 
     elif state.fever_cooldown_timer > 0:
-        cd_text = f"冷卻中  {int(state.fever_cooldown_timer)}s"
-        painter.setFont(_FONT_MODE)
-        tw_cd = painter.fontMetrics().horizontalAdvance(cd_text)
-        painter.setPen(QPen(_CHUD_COOL))
-        painter.drawText(QPointF(AX - tw_cd / 2, FACE_TOP - 12), cd_text)
+        # 充能進度條：從砧面左緣向右延伸，代替"冷卻中"文字
+        cd_total = max(1.0, state.fever_cooldown_duration)
+        prog     = 1.0 - state.fever_cooldown_timer / cd_total      # 0 → 1
+        # 顏色：暗紅 → 橙 → 橙金（隨進度升溫）
+        r = min(255, int(110 + prog * 145))
+        g = min(255, int(28  + prog * 162))
+        b = 0
+        # 脈動速度隨充能加快，製造「能量湧動」感
+        pulse_spd = 2.2 + prog * 3.5
+        pulse     = 0.82 + 0.18 * abs(math.sin(state.play_time * pulse_spd))
+        base_alpha = int((45 + prog * 185) * pulse)
+
+        bar_left = float(_V2_TL_X)
+        bar_top  = float(FACE_TOP) - 5.5
+        bar_w    = float(_V2_TR_X - _V2_TL_X) * prog
+        bar_h    = 4.0
+
+        painter.setPen(Qt.NoPen)
+        # 柔光暈（條後方較寬較淡的光）
+        if prog > 0.01:
+            glow_a = int((12 + prog * 45) * pulse)
+            painter.setBrush(QBrush(QColor(r, g, b, glow_a)))
+            painter.drawRoundedRect(
+                QRectF(bar_left - 2, bar_top - 5, bar_w + 4, bar_h + 10), 4, 4
+            )
+        # 主條
+        if bar_w > 0.5:
+            painter.setBrush(QBrush(QColor(r, g, b, base_alpha)))
+            painter.drawRoundedRect(QRectF(bar_left, bar_top, bar_w, bar_h), 2, 2)
+            # 亮白前緣（充能前沿光點）
+            if bar_w > 6:
+                painter.setBrush(QBrush(QColor(
+                    min(255, r + 55), min(255, g + 65), 60,
+                    min(255, int(base_alpha * 1.5)),
+                )))
+                painter.drawRoundedRect(
+                    QRectF(bar_left + bar_w - 5, bar_top, 5, bar_h), 2, 2
+                )
 
     elif state.consecutive_full_charge > 0:
         filled  = "★" * state.consecutive_full_charge

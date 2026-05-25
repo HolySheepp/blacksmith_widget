@@ -84,7 +84,7 @@ class GameState:
         self.typing_pending:      bool  = False
         self.typing_wants_strike: bool  = False
         self.typing_charge:       int   = 0
-        self.typing_base_ms:      float = TYPING_BASE_MS
+        self.typing_base_ms:      float = float(_sv.get("typing_base_ms", TYPING_BASE_MS))
         self.typing_max_charge:   int   = int(_sv.get("typing_max_charge", TYPING_MAX_CHARGE))
         self.typing_cooldown:     float = 0.0
         self.charge_pulses: list[dict]  = []
@@ -348,6 +348,7 @@ class GameState:
             "fever_duration":          self.fever_duration,
             "fever_cooldown_duration": self.fever_cooldown_duration,
             "autostart":               self.autostart,
+            "typing_base_ms":          self.typing_base_ms,
             "charge_ex_lift":          self.charge_ex_lift,
             "widget_x":                self.widget_x,
             "widget_y":                self.widget_y,
@@ -379,6 +380,7 @@ class GameState:
         self.typing_wants_strike = False
         self.typing_cooldown     = 0.0
         self.typing_max_charge   = TYPING_MAX_CHARGE
+        self.typing_base_ms      = TYPING_BASE_MS
         self.charge_pulses.clear()
         self.charge_ex_armed      = False
         self.charge_ex_timer      = 0.0

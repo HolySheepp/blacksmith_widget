@@ -54,6 +54,9 @@ TYPING_BASE_MS    = 520
 TYPING_MAX_CHARGE = 5
 
 # ── Charge colours: forge temperature gradient (dark embers → blue-white) ─────
+# 梯度說明：暗紅 → 橙 → 琥珀 → 近白熱 → 淡藍白 → 藍白（越藍越高溫，符合玩家直覺）
+# 8 段改為淡黃白（避免與暴擊金色 (255,230,50) 混淆）
+# 9 段改為淡藍白（過渡到藍白）
 CHARGE_COLORS = [
     (0x99, 0x11, 0x00),   #  1  dark ember red
     (0xcc, 0x22, 0x00),   #  2  dark cherry
@@ -62,8 +65,8 @@ CHARGE_COLORS = [
     (0xff, 0x66, 0x00),   #  5  bright orange-red
     (0xff, 0x8c, 0x00),   #  6  orange
     (0xff, 0xaa, 0x00),   #  7  amber
-    (0xff, 0xdd, 0x22),   #  8  yellow
-    (0xff, 0xff, 0x99),   #  9  yellow-white (near white-hot)
+    (0xff, 0xf0, 0xc0),   #  8  pale warm white (near white-hot — clearly ≠ crit gold)
+    (0xdc, 0xee, 0xff),   #  9  pale blue-white (bridging to full blue-white)
     (0xaa, 0xdd, 0xff),   # 10  blue-white (over-heated)
 ]
 
