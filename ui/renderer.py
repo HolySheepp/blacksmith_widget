@@ -819,6 +819,16 @@ def _draw_turbo_lines(painter: QPainter, state: GameState,
             fg  = min(255, int(fg + glow * max(0, sg - fg) * mix))
             fb  = min(255, int(fb + glow * max(0, sb - fb) * mix))
             fa  = int((200 if is_active else 140 if active_ln >= 0 else 200) * pulse)
+            # 活躍線打擊縮小光暈（矩形版，對應連打點的光圈縮小效果）
+            if is_active and glow > 0.04:
+                exp_w = glow * 7.0
+                exp_h = glow * 5.0
+                painter.setBrush(QBrush(QColor(fr, fg, fb, int(glow * 160))))
+                painter.drawRoundedRect(
+                    QRectF(lx - lw/2 - exp_w, y0 - exp_h,
+                           lw + exp_w * 2,    ht + exp_h * 2),
+                    2.5, 2.5,
+                )
             painter.setBrush(QBrush(QColor(fr, fg, fb, fa)))
             painter.drawRoundedRect(QRectF(lx - lw/2, y0, lw, ht), 1.5, 1.5)
 
@@ -890,32 +900,25 @@ def _draw_charge_circle(painter: QPainter, state: GameState,
 
 def _draw_combo_dots(painter: QPainter, state: GameState,
                      glow: float, sr: int, sg: int, sb: int):
-    """連打模式：三個小圓構成正三角，逆時針輪流亮起（藍色）。"""
+    """連打模式：三個小圓構成正三角，平時全暗，打擊後活躍點出現紫色縮小光圈。"""
     painter.setPen(Qt.NoPen)
-    active = getattr(state, 'combo_dot_idx', -1)   # -1 = 尚未打擊，無亮點
+    active = getattr(state, 'combo_dot_idx', -1)   # -1 = 尚未打擊，無效果
     for i, (dx, dy) in enumerate(_MI_DOT_POS):
-        if i == active:
-            # 亮點：鮮藍色底，打擊後短暫混入 strike_color
-            r = min(255, int( 70 + glow * max(0, sr -  70)))
-            g = min(255, int(160 + glow * max(0, sg - 160)))
-            b = min(255, int(255 + glow * max(0, sb - 255)))
-            a = min(255, int(240 + glow * 15))
-            # 打擊時畫一圈明亮暈光
-            if glow > 0.04:
-                glow_r = _MI_DOT_R + 3.0 + glow * 5.0
-                painter.setBrush(QBrush(QColor(
-                    min(255, int(80  + glow * max(0, sr - 80))),
-                    min(255, int(170 + glow * max(0, sg - 170))),
-                    255,
-                    int(glow * 200),
-                )))
-                painter.drawEllipse(QPointF(dx, dy), glow_r, glow_r)
-        else:
-            # 暗點：近黑，打擊時微閃
-            r = min(255, int(18 + glow * (sr - 18) * 0.30))
-            g = min(255, int(18 + glow * (sg - 18) * 0.30))
-            b = min(255, int(22 + glow * (sb - 22) * 0.35))
-            a = 210
+        # 打擊縮小光圈：僅活躍點，glow 衰退時圓半徑跟著縮小（紫色）
+        if i == active and glow > 0.04:
+            glow_r = _MI_DOT_R + 3.0 + glow * 5.5
+            painter.setBrush(QBrush(QColor(
+                min(255, int(170 * glow)),   # 紫
+                min(255, int( 50 * glow)),
+                min(255, int(255 * glow)),
+                int(glow * 210),
+            )))
+            painter.drawEllipse(QPointF(dx, dy), glow_r, glow_r)
+        # 點本體：始終暗色（不持續亮），打擊時只微微帶一點 strike_color
+        r = min(255, int(22 + glow * (sr - 22) * 0.28))
+        g = min(255, int(22 + glow * (sg - 22) * 0.28))
+        b = min(255, int(25 + glow * (sb - 25) * 0.32))
+        a = 215
         painter.setBrush(QBrush(QColor(r, g, b, a)))
         painter.drawEllipse(QPointF(dx, dy), _MI_DOT_R, _MI_DOT_R)
 
