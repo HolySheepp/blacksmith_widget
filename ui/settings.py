@@ -84,11 +84,13 @@ def _fmt_time(seconds: float) -> str:
 
 class SettingsDialog(QDialog):
 
-    def __init__(self, state, parent=None, center_cb=None, devtools_cb=None):
+    def __init__(self, state, parent=None, center_cb=None, devtools_cb=None,
+                 always_on_top_cb=None):
         super().__init__(parent)
-        self.state        = state
-        self._center_cb   = center_cb
-        self._devtools_cb = devtools_cb
+        self.state              = state
+        self._center_cb         = center_cb
+        self._devtools_cb       = devtools_cb
+        self._always_on_top_cb  = always_on_top_cb
         self.setWindowTitle("⚙  設定")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
         self.setMinimumWidth(420)
@@ -155,6 +157,16 @@ class SettingsDialog(QDialog):
         auto_row.addWidget(self.autostart_cb)
         auto_row.addStretch()
         cl.addLayout(auto_row)
+
+        # Always-on-top
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("永遠置頂:"))
+        self.always_on_top_cb = QCheckBox()
+        self.always_on_top_cb.setToolTip("關閉後，其他視窗可以覆蓋在鐵砧上方")
+        self.always_on_top_cb.toggled.connect(self._on_always_on_top_changed)
+        top_row.addWidget(self.always_on_top_cb)
+        top_row.addStretch()
+        cl.addLayout(top_row)
 
         sep1b = QFrame()
         sep1b.setFrameShape(QFrame.HLine)
@@ -264,6 +276,10 @@ class SettingsDialog(QDialog):
         self.autostart_cb.setChecked(self.state.autostart)
         self.autostart_cb.blockSignals(False)
 
+        self.always_on_top_cb.blockSignals(True)
+        self.always_on_top_cb.setChecked(self.state.always_on_top)
+        self.always_on_top_cb.blockSignals(False)
+
         scale_int = max(3, min(10, round(s.ui_scale * 10)))
         self.scale_slider.blockSignals(True)
         self.scale_slider.setValue(scale_int)
@@ -288,6 +304,11 @@ class SettingsDialog(QDialog):
     def _on_autostart_changed(self, enabled: bool):
         self.state.autostart = enabled
         _autostart_set(enabled)
+
+    def _on_always_on_top_changed(self, enabled: bool):
+        self.state.always_on_top = enabled
+        if self._always_on_top_cb is not None:
+            self._always_on_top_cb(enabled)
 
     def _apply_scale(self):
         self.state.ui_scale = self.scale_slider.value() / 10.0

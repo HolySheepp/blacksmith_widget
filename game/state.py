@@ -148,6 +148,7 @@ class GameState:
         self.hide_anvil:      bool = bool(_sv.get("hide_anvil",      False))
         self.lock_position:   bool = bool(_sv.get("lock_position",   False))
         self.anvil_v2:        bool = bool(_sv.get("anvil_v2",        True))
+        self.always_on_top:   bool = bool(_sv.get("always_on_top",   True))
 
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
@@ -355,6 +356,7 @@ class GameState:
             "hide_anvil":              self.hide_anvil,
             "lock_position":           self.lock_position,
             "anvil_v2":                self.anvil_v2,
+            "always_on_top":           self.always_on_top,
             "forge_counts":            list(self.forge_counts),
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,
@@ -414,6 +416,7 @@ class GameState:
         self.hide_anvil         = False
         self.lock_position      = False
         self.anvil_v2           = True
+        self.always_on_top      = True
         self.mouse_on_widget    = False
         # Metal forging
         self.forge_counts        = [0] * len(METAL_TYPES)
