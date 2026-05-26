@@ -1,6 +1,6 @@
 """
 ToastWidget — small non-intrusive notification bubble.
-Auto-dismisses after 8 s; can also be closed with the × button.
+Auto-dismisses after 10 s; can also be closed with the × button.
 No window decorations; always-on-top; transparent background.
 """
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton

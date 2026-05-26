@@ -157,7 +157,7 @@ class BlacksmithWidget(QWidget):
         self._is_dragging:  bool          = False
 
         # Ghost guide hide delay — leaveEvent starts this; enterEvent cancels it.
-        # Fires after 1 s to clear mouse_on_widget so the guide fades out.
+        # Fires after 400 ms to clear mouse_on_widget so the guide fades out.
         self._ghost_hide_timer = QTimer(self)
         self._ghost_hide_timer.setSingleShot(True)
         self._ghost_hide_timer.setInterval(400)

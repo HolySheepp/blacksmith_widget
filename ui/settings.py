@@ -69,19 +69,6 @@ def _autostart_set(enable: bool) -> None:
 _DEF_SCALE = 0.6
 
 
-def _fmt_time(seconds: float) -> str:
-    s = int(seconds)
-    h = s // 3600
-    m = (s % 3600) // 60
-    s = s % 60
-    if h > 0:
-        return f"{h}時{m:02d}分{s:02d}秒"
-    elif m > 0:
-        return f"{m}分{s:02d}秒"
-    else:
-        return f"{s}秒"
-
-
 class SettingsDialog(QDialog):
 
     def __init__(self, state, parent=None, center_cb=None, devtools_cb=None,
