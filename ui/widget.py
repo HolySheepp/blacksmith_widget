@@ -356,7 +356,7 @@ class BlacksmithWidget(QWidget):
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        # Don't hide immediately — give the player 1 s to reach the ghost circle.
+        # Don't hide immediately — give the player 400 ms to reach the ghost circle.
         self._ghost_hide_timer.start()
         super().leaveEvent(event)
 
@@ -515,6 +515,7 @@ class BlacksmithWidget(QWidget):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+        s.charge_prefire      = False
 
     def _toggle_turbo(self):
         s = self.state

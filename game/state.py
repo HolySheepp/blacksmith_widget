@@ -161,9 +161,12 @@ class GameState:
         self.turbo_line_idx: int = -1
 
         # ── Metal forging system ───────────────────────────────────────────
-        _fc = _sv.get("forge_counts", [])
-        self.forge_counts: list = [int(_fc[i]) if i < len(_fc) else 0
-                                   for i in range(len(METAL_TYPES))]
+        try:
+            _fc = _sv.get("forge_counts", [])
+            self.forge_counts: list = [int(_fc[i]) if i < len(_fc) else 0
+                                       for i in range(len(METAL_TYPES))]
+        except Exception:
+            self.forge_counts: list = [0] * len(METAL_TYPES)
         # 恢復上次未完成的金屬塊（包含進度），否則等第一次敲擊後再生成
         # 金屬鍛造關閉時跳過恢復，直接清空
         _cm_save = _sv.get("current_metal_save") if self.show_metal_forge else None
@@ -387,7 +390,6 @@ class GameState:
             "anvil_v2":                self.anvil_v2,
             "always_on_top":           self.always_on_top,
             "forge_counts":            list(self.forge_counts),
-            "metal_spawned":           self.metal_spawned,
             "current_metal_save":      self._metal_to_save(),
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,

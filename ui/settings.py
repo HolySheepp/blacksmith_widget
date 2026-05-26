@@ -353,6 +353,7 @@ class SettingsDialog(QDialog):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+        s.charge_prefire      = False
 
     def _check_secret(self):
         """Verify passphrase and open Dev Tools if it matches."""
