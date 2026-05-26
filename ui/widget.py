@@ -504,8 +504,6 @@ class BlacksmithWidget(QWidget):
         s = self.state
         if s.turbo_mode or s.kb_mode == "charge_legacy":
             return   # these modes are managed from Settings
-        if s.turbo_mode and s.fever_active:
-            return
         s.kb_mode             = "combo" if s.kb_mode == "charge" else "charge"
         s.kb_state            = "idle"
         s.kb_active           = False

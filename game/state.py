@@ -180,9 +180,11 @@ class GameState:
                 self.metal_spawned:  bool              = False
         else:
             self.current_metal:  MetalPiece | None = None
-            self.metal_spawned:  bool              = (
-                bool(_sv.get("metal_spawned", False)) if self.show_metal_forge else False
-            )
+            # No metal could be restored (first launch, or saved during spawn/flash
+            # animation where _metal_to_save() returned None).  Always reset to False
+            # so the next hit re-spawns a fresh piece — avoids metal permanently
+            # disappearing when the game was closed mid-animation.
+            self.metal_spawned:  bool              = False
         # Last hit surface Y — updated each strike, used by renderer for sparks / flash
         self.last_hit_surface_y: float = float(FACE_TOP)
 
@@ -444,6 +446,13 @@ class GameState:
         self.show_click      = True
         self.show_charge_bar = False
         self.autostart       = False
+        # Apply the registry change immediately — blockSignals in _load_from_state
+        # prevents the checkbox signal from firing, so we must clear it here.
+        try:
+            from ui.settings import _autostart_set as _ast
+            _ast(False)
+        except Exception:
+            pass
         self.widget_x        = None
         self.widget_y        = None
         # Visuals
@@ -621,7 +630,8 @@ class GameState:
                         else 1)
         # Actual visual hit surface Y: top of metal when visible, else anvil face
         _m = self.current_metal
-        if (not self.hide_anvil and _m is not None and not _m.dead
+        if (self.show_metal_forge and not self.hide_anvil
+                and _m is not None and not _m.dead
                 and _m.spawn_t >= 1.0 and _m.flash_t <= 0.0):
             _hit_y = FACE_TOP - _m.thickness
         else:

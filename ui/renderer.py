@@ -626,7 +626,8 @@ def _draw_flash(painter: QPainter, state: GameState):
     # Flash anchored to the actual hit surface (metal top or anvil face)
     hit_y  = getattr(state, 'last_hit_surface_y', float(FACE_TOP))
     m      = getattr(state, 'current_metal', None)
-    if (not state.hide_anvil and m is not None and not m.dead
+    if (getattr(state, 'show_metal_forge', True)
+            and not state.hide_anvil and m is not None and not m.dead
             and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
         fl = AX - (_V2_TR_X - _V2_TL_X) / 2
         fw = float(_V2_TR_X - _V2_TL_X)
