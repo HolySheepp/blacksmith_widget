@@ -74,7 +74,7 @@ class GameState:
 
         # ── Keyboard / input state machine ─────────────────────────────────
         self.kb_active: bool = False
-        self.kb_mode: str    = _sv.get("kb_mode", "combo")   # "combo" | "charge" | "charge_ex"
+        self.kb_mode: str    = _sv.get("kb_mode", "charge")  # "combo" | "charge" | "charge_ex"
         self.kb_state: str   = "idle"     # "idle" | "strike" | "wait"
 
         # Combo mode: queued strikes
@@ -132,7 +132,7 @@ class GameState:
         self.play_time: float = float(_sv.get("play_time", 0.0))
 
         # ── Turbo / Fever mode (loaded from save) ──────────────────────────
-        self.turbo_mode: bool               = bool(_sv.get("turbo_mode", False))
+        self.turbo_mode: bool               = bool(_sv.get("turbo_mode", True))
         # Sanitise: turbo mode's base is always "charge"; "combo" only appears
         # during fever.  If we exited mid-fever the save has turbo_mode=True +
         # kb_mode="combo" — correct it so we don't resume in a free-combo state.
@@ -416,7 +416,7 @@ class GameState:
         self.click_count = 0
         self.play_time   = 0.0
         # Input state
-        self.kb_mode             = "combo"
+        self.kb_mode             = "charge"
         self.kb_active           = False
         self.kb_state            = "idle"
         self.space_queue         = 0
@@ -433,7 +433,7 @@ class GameState:
         self.charge_prefire       = False
         self.charge_ex_lift       = CHARGE_EX_LIFT
         # Turbo / fever
-        self.turbo_mode              = False
+        self.turbo_mode              = True
         self.fever_active            = False
         self.fever_timer             = 0.0
         self.fever_cooldown_timer    = 0.0
