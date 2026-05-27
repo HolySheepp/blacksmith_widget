@@ -1,7 +1,7 @@
 # Build outputs
 build/
 dist/
-*.spec
+*_noUPX.spec
 
 # Python cache
 __pycache__/
