@@ -12,7 +12,7 @@ Settings:
 """
 import sys
 import os
-import subprocess
+import ctypes
 import hashlib as _hlib
 import winreg
 
@@ -53,26 +53,79 @@ def _autostart_get() -> bool:
     return os.path.exists(_startup_lnk_path())
 
 
+def _create_lnk(target_exe: str, lnk_path: str) -> None:
+    """Create a Windows .lnk shortcut via COM IShellLink (pure ctypes).
+    No subprocess, no external deps — ole32.dll is always present on Windows."""
+
+    class _GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", ctypes.c_ulong),
+            ("Data2", ctypes.c_ushort),
+            ("Data3", ctypes.c_ushort),
+            ("Data4", ctypes.c_ubyte * 8),
+        ]
+
+    def _guid(d1, d2, d3, *d4):
+        g = _GUID()
+        g.Data1, g.Data2, g.Data3 = d1, d2, d3
+        g.Data4 = (ctypes.c_ubyte * 8)(*d4)
+        return g
+
+    def _vf(ptr, idx, rtype, *atypes):
+        """Call vtable method at index idx on a COM interface pointer."""
+        vt = ctypes.cast(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_void_p))[0],
+                         ctypes.POINTER(ctypes.c_void_p))
+        return ctypes.WINFUNCTYPE(rtype, ctypes.c_void_p, *atypes)(vt[idx])
+
+    # CLSID_ShellLink  {00021401-0000-0000-C000-000000000046}
+    # IID_IShellLinkW  {000214F9-0000-0000-C000-000000000046}
+    # IID_IPersistFile {0000010B-0000-0000-C000-000000000046}
+    CLSID_ShellLink  = _guid(0x00021401, 0, 0, 0xC0,0,0,0,0,0,0,0x46)
+    IID_IShellLinkW  = _guid(0x000214F9, 0, 0, 0xC0,0,0,0,0,0,0,0x46)
+    IID_IPersistFile = _guid(0x0000010B, 0, 0, 0xC0,0,0,0,0,0,0,0x46)
+
+    ole32 = ctypes.WinDLL("ole32")
+    ole32.CoInitialize(None)   # S_OK=0 or S_FALSE=1 (already init) — both fine
+
+    psl = ctypes.c_void_p(None)
+    hr = ole32.CoCreateInstance(
+        ctypes.byref(CLSID_ShellLink), None, 1,   # 1 = CLSCTX_INPROC_SERVER
+        ctypes.byref(IID_IShellLinkW), ctypes.byref(psl),
+    )
+    if hr != 0:
+        ole32.CoUninitialize()
+        return
+
+    try:
+        # IShellLinkW vtable: [9]=SetWorkingDirectory, [19]=SetPath
+        _vf(psl, 19, ctypes.c_long, ctypes.c_wchar_p)(psl, target_exe)
+        _vf(psl, 9,  ctypes.c_long, ctypes.c_wchar_p)(psl, os.path.dirname(target_exe))
+
+        # QI for IPersistFile
+        ppf = ctypes.c_void_p(None)
+        hr = _vf(psl, 0, ctypes.c_long,
+                 ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)
+                 )(psl, ctypes.byref(IID_IPersistFile), ctypes.byref(ppf))
+        if hr == 0 and ppf:
+            try:
+                # IPersistFile vtable: [6]=Save
+                _vf(ppf, 6, ctypes.c_long,
+                    ctypes.c_wchar_p, ctypes.c_int)(ppf, lnk_path, 1)
+            finally:
+                _vf(ppf, 2, ctypes.c_ulong)(ppf)   # Release IPersistFile
+    finally:
+        _vf(psl, 2, ctypes.c_ulong)(psl)            # Release IShellLink
+        ole32.CoUninitialize()
+
+
 def _autostart_set(enable: bool) -> None:
     """Create or remove the Startup-folder .lnk shortcut.
-    Uses PowerShell WScript.Shell (built-in on all Windows) — no extra deps,
-    no admin rights required, less suspicious to AV than registry writes."""
+    Uses COM IShellLink via ctypes — no subprocess, no admin rights,
+    no AV-suspicious behaviour."""
     lnk = _startup_lnk_path()
     if enable:
-        exe = _exe_path()
-        ps = (
-            f"$ws = New-Object -ComObject WScript.Shell; "
-            f"$s = $ws.CreateShortcut('{lnk}'); "
-            f"$s.TargetPath = '{exe}'; "
-            f"$s.WorkingDirectory = '{os.path.dirname(exe)}'; "
-            f"$s.Save()"
-        )
         try:
-            subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                capture_output=True, timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+            _create_lnk(_exe_path(), lnk)
         except Exception:
             pass
     else:
