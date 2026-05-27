@@ -27,7 +27,7 @@ from ui.settings    import SettingsDialog
 from ui.stats       import StatsDialog
 from input.listener import KeyboardListener
 from save           import write_save
-from ui.settings    import _autostart_set
+from ui.settings    import _autostart_set, _autostart_migrate
 
 def _wlog(msg: str) -> None:
     """Append one line to the startup log from within the widget (best-effort)."""
@@ -70,7 +70,8 @@ class BlacksmithWidget(QWidget):
 
         _wlog("[init] GameState()")
         self.state = GameState()
-        _wlog("[init] autostart_set")
+        _wlog("[init] autostart_migrate + autostart_set")
+        _autostart_migrate()                   # one-time: remove legacy registry Run key if present
         _autostart_set(self.state.autostart)   # apply saved autostart preference on every launch
         # Apply saved always-on-top preference before first show() — no visible flicker
         if not self.state.always_on_top:

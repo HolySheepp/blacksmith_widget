@@ -12,6 +12,7 @@ Settings:
 """
 import sys
 import os
+import subprocess
 import hashlib as _hlib
 import winreg
 
@@ -38,31 +39,58 @@ def _exe_path() -> str:
     return os.path.abspath(sys.argv[0])  # running as .py script
 
 
+def _startup_lnk_path() -> str:
+    """Return full path of the Startup-folder shortcut."""
+    startup = os.path.join(
+        os.environ.get("APPDATA", ""),
+        r"Microsoft\Windows\Start Menu\Programs\Startup",
+    )
+    return os.path.join(startup, "BlacksmithWidget.lnk")
+
+
 def _autostart_get() -> bool:
-    """Return True if the autostart registry entry exists and matches current exe."""
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY) as k:
-            val, _ = winreg.QueryValueEx(k, _REG_NAME)
-            return val.strip('"') == _exe_path()
-    except FileNotFoundError:
-        return False
-    except Exception:
-        return False
+    """Return True if the Startup-folder shortcut exists."""
+    return os.path.exists(_startup_lnk_path())
 
 
 def _autostart_set(enable: bool) -> None:
-    """Add or remove the autostart registry entry."""
+    """Create or remove the Startup-folder .lnk shortcut.
+    Uses PowerShell WScript.Shell (built-in on all Windows) — no extra deps,
+    no admin rights required, less suspicious to AV than registry writes."""
+    lnk = _startup_lnk_path()
+    if enable:
+        exe = _exe_path()
+        ps = (
+            f"$ws = New-Object -ComObject WScript.Shell; "
+            f"$s = $ws.CreateShortcut('{lnk}'); "
+            f"$s.TargetPath = '{exe}'; "
+            f"$s.WorkingDirectory = '{os.path.dirname(exe)}'; "
+            f"$s.Save()"
+        )
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, timeout=10,
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            if os.path.exists(lnk):
+                os.remove(lnk)
+        except Exception:
+            pass
+
+
+def _autostart_migrate() -> None:
+    """One-time migration: remove legacy registry Run key if it still exists.
+    Called once at startup; after removal this function is a no-op forever."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY,
                             access=winreg.KEY_SET_VALUE) as k:
-            if enable:
-                winreg.SetValueEx(k, _REG_NAME, 0, winreg.REG_SZ,
-                                  f'"{_exe_path()}"')
-            else:
-                try:
-                    winreg.DeleteValue(k, _REG_NAME)
-                except FileNotFoundError:
-                    pass
+            winreg.DeleteValue(k, _REG_NAME)
+    except FileNotFoundError:
+        pass
     except Exception:
         pass
 
