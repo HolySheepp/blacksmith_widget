@@ -156,6 +156,7 @@ class BlacksmithWidget(QWidget):
         self._press_global: QPoint | None = None
         self._drag_offset:  QPoint | None = None
         self._is_dragging:  bool          = False
+        self._press_local:  QPoint | None = None   # widget-local pos at press (for arrow detection)
 
         # Ghost guide hide delay — leaveEvent starts this; enterEvent cancels it.
         # Fires after 400 ms to clear mouse_on_widget so the guide fades out.
@@ -325,6 +326,7 @@ class BlacksmithWidget(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self._press_local = event.pos()    # record local pos for arrow hit-test
             if not self.state.lock_position:
                 self._press_global = event.globalPos()
                 self._drag_offset  = event.globalPos() - self.frameGeometry().topLeft()
@@ -347,9 +349,35 @@ class BlacksmithWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            if not self._is_dragging and self._press_local is not None:
+                self._check_arrow_click(event.pos())
             self._is_dragging  = False
             self._press_global = None
             self._drag_offset  = None
+            self._press_local  = None
+
+    # Arrow click zones (screen pixels; match _NAV_L/R geometry in renderer.py scaled by ui_scale)
+    # Renderer draws arrows in game-space at x≈18–72 (left) and x≈728–782 (right), y≈252–348.
+    # At default SCALE=0.6: left zone x<45, right zone x>435, y in [90, 270] screen px.
+    # We use slightly generous thresholds so the feel is forgiving at any ui_scale.
+    _ARROW_W  = 50   # screen-pixel width of each side's click zone
+    _ARROW_Y1 = 80   # top of vertical window for arrow clicks  (screen px)
+    _ARROW_Y2 = 280  # bottom of vertical window for arrow clicks (screen px)
+
+    def _check_arrow_click(self, pos: QPoint):
+        """If the click landed in a nav-arrow zone, switch widget accordingly."""
+        x, y = pos.x(), pos.y()
+        if not (self._ARROW_Y1 <= y <= self._ARROW_Y2):
+            return
+        if x < self._ARROW_W:
+            self._switch_widget(-1)
+        elif x > WIDGET_W - self._ARROW_W:
+            self._switch_widget(1)
+
+    def _switch_widget(self, delta: int):
+        """Cycle widget_idx by delta (±1) and trigger a repaint."""
+        self.state.widget_idx = (self.state.widget_idx + delta) % 3
+        self.update()
 
     def enterEvent(self, event):
         self._ghost_hide_timer.stop()   # cancel any pending fade-out

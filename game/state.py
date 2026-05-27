@@ -155,6 +155,10 @@ class GameState:
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
 
+        # ── Widget navigation (saved) ──────────────────────────────────────
+        # 0 = 鐵砧, 1 = 工作站, 2 = 店面
+        self.widget_idx: int = int(_sv.get("widget_idx", 0))
+
         # Transient: 連打模式三角點指示器（-1 = 尚未打擊，無亮點）
         self.combo_dot_idx: int  = -1
         # Transient: 渦輪 fever 連打直線指示器（-1 = fever 尚未打擊）
@@ -223,6 +227,8 @@ class GameState:
         Routes to combo or charge handler based on current mode.
         Always increments click_count.
         """
+        if self.widget_idx != 0:
+            return   # 只有鐵砧 widget 接受輸入
         self.click_count += 1
         if self.kb_mode == "combo":
             self._handle_combo_key()
@@ -393,6 +399,7 @@ class GameState:
             "current_metal_save":      self._metal_to_save(),
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,
+            "widget_idx":              self.widget_idx,
         }
 
     def _metal_to_save(self) -> dict | None:
@@ -485,6 +492,7 @@ class GameState:
         self.last_crit      = False
         self.combo_dot_idx  = -1
         self.turbo_line_idx = -1
+        self.widget_idx     = 0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal

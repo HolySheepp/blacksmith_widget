@@ -22,6 +22,7 @@ from config import (
     HEAD_OFFSET, HEAD_PERP,
     HL, HR, HP,
     GRIP_TO_BUTT,
+    GAME_W, GAME_H,
     get_charge_color,
 )
 from game.state import GameState
@@ -223,6 +224,39 @@ _WEAR_LINES = [
 # Text-shadow offsets tuple (no list rebuild each call)
 _SHADOW_OFS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 
+# ── Widget-nav arrows ─────────────────────────────────────────────────────────
+# Arrow triangles are in game-space (800×600); scaled at render time.
+# Screen zones for click detection (see widget.py _check_arrow_click):
+#   Left:  x < 45 px,  Right: x > 435 px,  Y: 90–270 px (≈ 150–450 game).
+
+_NAV_L_TIP  = QPointF( 18, 300)   # left  arrow tip (pointing ◀)
+_NAV_L_TOP  = QPointF( 72, 252)   # left  arrow top-right corner
+_NAV_L_BOT  = QPointF( 72, 348)   # left  arrow bot-right corner
+_NAV_R_TIP  = QPointF(782, 300)   # right arrow tip (pointing ▶)
+_NAV_R_TOP  = QPointF(728, 252)   # right arrow top-left corner
+_NAV_R_BOT  = QPointF(728, 348)   # right arrow bot-left corner
+_POLY_NAV_L = QPolygonF([_NAV_L_TIP, _NAV_L_TOP, _NAV_L_BOT])
+_POLY_NAV_R = QPolygonF([_NAV_R_TIP, _NAV_R_TOP, _NAV_R_BOT])
+
+# Nav dot indicator (bottom-centre)
+_NAV_DOT_CY    = 570
+_NAV_DOT_R     = 7.0
+_NAV_DOT_GAP   = 28
+_NAV_DOT_CX    = [GAME_W / 2 + (i - 1) * _NAV_DOT_GAP for i in range(3)]
+
+# ── Stub screens (workstation / shop) ────────────────────────────────────────
+_FONT_STUB_TITLE = QFont("Segoe UI", 38)
+_FONT_STUB_TITLE.setBold(True)
+_FONT_STUB_SUB   = QFont("Segoe UI", 19)
+
+_CSTUB_BG        = QColor(14, 11,  8,  230)
+_CSTUB_WOOD_D    = QColor(48, 33, 16,  210)
+_CSTUB_WOOD_L    = QColor(68, 48, 24,  180)
+_CSTUB_TITLE     = QColor(140, 118, 78, 210)
+_CSTUB_SUB       = QColor(85,  75, 55, 185)
+_CSTUB_DUST      = QColor(90,  80, 60,  55)
+_CSTUB_SHADOW    = QColor(0,   0,  0,  190)
+
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -237,31 +271,45 @@ def draw_frame(painter: QPainter, state: GameState):
     painter.save()
     painter.scale(state.ui_scale, state.ui_scale)
 
-    # Compute trig once per frame — shared by _draw_hammer and render_vcy_fast
-    a     = state.hammer_angle()
-    cos_a = math.cos(a)
-    sin_a = math.sin(a)
+    widget_idx = getattr(state, 'widget_idx', 0)
 
-    # Fever / cooldown / star text — drawn first so anvil renders on top
-    if not state.hide_anvil:
-        _draw_turbo_overlay(painter, state)
+    if widget_idx == 0:
+        # ── Anvil widget (original) ────────────────────────────────────────
+        # Compute trig once per frame — shared by _draw_hammer and render_vcy_fast
+        a     = state.hammer_angle()
+        cos_a = math.cos(a)
+        sin_a = math.sin(a)
 
-    if not state.hide_anvil:
-        if getattr(state, 'anvil_v2', True):
-            _draw_anvil_v2(painter, state)
+        # Fever / cooldown / star text — drawn first so anvil renders on top
+        if not state.hide_anvil:
+            _draw_turbo_overlay(painter, state)
+
+        if not state.hide_anvil:
+            if getattr(state, 'anvil_v2', True):
+                _draw_anvil_v2(painter, state)
+            else:
+                _draw_anvil(painter, state)
+            _draw_metal(painter, state)
+            _draw_anvil_mode_indicator(painter, state)
+        _draw_sparks(painter, state)
+        _draw_hammer(painter, state, cos_a, sin_a)
+        if not state.hide_anvil:
+            _draw_flash(painter, state)
+            _draw_hud(painter, state)
         else:
-            _draw_anvil(painter, state)
-        _draw_metal(painter, state)
-        _draw_anvil_mode_indicator(painter, state)
-    _draw_sparks(painter, state)
-    _draw_hammer(painter, state, cos_a, sin_a)
-    if not state.hide_anvil:
-        _draw_flash(painter, state)
-        _draw_hud(painter, state)
-    else:
-        if state.mouse_on_widget and not state.lock_position:
-            _draw_anvil_ghost(painter, state)
-    _draw_hit_numbers(painter, state)
+            if state.mouse_on_widget and not state.lock_position:
+                _draw_anvil_ghost(painter, state)
+        _draw_hit_numbers(painter, state)
+
+    elif widget_idx == 1:
+        _draw_workstation_stub(painter, state)
+
+    elif widget_idx == 2:
+        _draw_shop_stub(painter, state)
+
+    # Navigation arrows + dot indicator — always shown when mouse is on widget
+    if state.mouse_on_widget:
+        _draw_nav_arrows(painter, state)
 
     painter.restore()
 
@@ -1007,3 +1055,198 @@ def _draw_anvil_ghost(painter: QPainter, state: GameState):
     painter.setPen(Qt.NoPen)
     painter.setBrush(_GH_DOT_BRUSH)
     painter.drawEllipse(QPointF(AX, FACE_TOP), 3.0, 3.0)
+
+
+# ── Navigation arrows (shown on hover, all widgets) ───────────────────────────
+
+def _draw_nav_arrows(painter: QPainter, state: GameState):
+    """Draw ◀ / ▶ arrows at the widget edges; dot indicator at bottom.
+    Also paint near-invisible hit-area rects so transparent edges receive clicks."""
+    widget_idx = getattr(state, 'widget_idx', 0)
+
+    painter.setPen(Qt.NoPen)
+
+    # ── Near-invisible click areas (alpha=2 makes edge pixels hit-testable) ──
+    painter.setBrush(QBrush(QColor(0, 0, 0, 2)))
+    painter.drawRect(QRectF(0,             150, 90,  300))   # left zone
+    painter.drawRect(QRectF(GAME_W - 90,   150, 90,  300))   # right zone
+
+    # ── Arrow fill (white with moderate transparency) ──────────────────────
+    arrow_col = QColor(220, 215, 200, 170)
+    shadow_col = QColor(0, 0, 0, 100)
+
+    # Left arrow shadow, then fill
+    painter.setBrush(QBrush(shadow_col))
+    painter.drawPolygon(QPolygonF([
+        QPointF(_NAV_L_TIP.x() + 3, _NAV_L_TIP.y() + 3),
+        QPointF(_NAV_L_TOP.x() + 3, _NAV_L_TOP.y() + 3),
+        QPointF(_NAV_L_BOT.x() + 3, _NAV_L_BOT.y() + 3),
+    ]))
+    painter.setBrush(QBrush(arrow_col))
+    painter.drawPolygon(_POLY_NAV_L)
+
+    # Right arrow shadow, then fill
+    painter.setBrush(QBrush(shadow_col))
+    painter.drawPolygon(QPolygonF([
+        QPointF(_NAV_R_TIP.x() + 3, _NAV_R_TIP.y() + 3),
+        QPointF(_NAV_R_TOP.x() + 3, _NAV_R_TOP.y() + 3),
+        QPointF(_NAV_R_BOT.x() + 3, _NAV_R_BOT.y() + 3),
+    ]))
+    painter.setBrush(QBrush(arrow_col))
+    painter.drawPolygon(_POLY_NAV_R)
+
+    # ── Bottom dot indicator ───────────────────────────────────────────────
+    _WIDGET_NAMES = ["鐵砧", "工作站", "店面"]
+    for i, cx in enumerate(_NAV_DOT_CX):
+        if i == widget_idx:
+            painter.setBrush(QBrush(QColor(220, 200, 150, 220)))
+            painter.drawEllipse(QPointF(cx, _NAV_DOT_CY), _NAV_DOT_R, _NAV_DOT_R)
+        else:
+            painter.setBrush(QBrush(QColor(100, 90, 70, 140)))
+            painter.drawEllipse(QPointF(cx, _NAV_DOT_CY), _NAV_DOT_R * 0.65, _NAV_DOT_R * 0.65)
+
+    # ── Current widget name (small, above dots) ────────────────────────────
+    painter.setFont(_FONT_STUB_SUB)
+    fm = painter.fontMetrics()
+    name = _WIDGET_NAMES[widget_idx]
+    nx   = GAME_W / 2 - fm.horizontalAdvance(name) / 2
+    ny   = float(_NAV_DOT_CY - 18)
+    painter.setPen(QPen(QColor(0, 0, 0, 150)))
+    for ox, oy in _SHADOW_OFS:
+        painter.drawText(QPointF(nx + ox, ny + oy), name)
+    painter.setPen(QPen(QColor(200, 185, 140, 190)))
+    painter.drawText(QPointF(nx, ny), name)
+
+
+# ── Workstation stub ──────────────────────────────────────────────────────────
+
+def _draw_workstation_stub(painter: QPainter, state: GameState):
+    """廢棄工作站佔位畫面。"""
+    painter.setPen(Qt.NoPen)
+
+    # Background
+    painter.setBrush(QBrush(_CSTUB_BG))
+    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
+
+    # Workbench: table top + two legs + lower shelf
+    painter.setBrush(QBrush(_CSTUB_WOOD_D))
+    painter.drawRect(QRectF(185, 358, 430, 32))    # table top
+    painter.drawRect(QRectF(208, 390, 28, 110))    # left leg
+    painter.drawRect(QRectF(563, 390, 28, 110))    # right leg
+    painter.setBrush(QBrush(_CSTUB_WOOD_L))
+    painter.drawRect(QRectF(228, 456, 342, 20))    # shelf
+    # Table top highlight edge
+    painter.setBrush(QBrush(QColor(80, 58, 28, 120)))
+    painter.drawRect(QRectF(185, 358, 430, 6))
+
+    # Scattered items on the table (simple rectangles = tools)
+    painter.setBrush(QBrush(QColor(58, 48, 38, 160)))
+    painter.drawRect(QRectF(240, 336, 55, 22))    # block 1
+    painter.drawRect(QRectF(460, 330, 18, 28))    # rod 1
+    painter.drawRect(QRectF(390, 340, 80, 12))    # plank
+    painter.setBrush(QBrush(QColor(72, 60, 44, 140)))
+    painter.drawRect(QRectF(310, 338, 30, 20))    # block 2
+
+    # Dust accumulation overlay
+    painter.setBrush(QBrush(_CSTUB_DUST))
+    painter.drawRect(QRectF(185, 358, 430, 10))
+
+    # ── Cobweb (two diagonal lines in top-left corner) ─────────────────────
+    web_pen = QPen(QColor(90, 85, 70, 90))
+    web_pen.setWidthF(1.0)
+    painter.setPen(web_pen)
+    for i in range(4):
+        painter.drawLine(
+            QPointF(155 + i * 18, 130),
+            QPointF(155,          130 + i * 18),
+        )
+    painter.setPen(Qt.NoPen)
+
+    # ── Title: "工作站" ────────────────────────────────────────────────────
+    painter.setFont(_FONT_STUB_TITLE)
+    fm = painter.fontMetrics()
+    title = "工作站"
+    tx = GAME_W / 2 - fm.horizontalAdvance(title) / 2
+    painter.setPen(QPen(_CSTUB_SHADOW))
+    for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
+        painter.drawText(QPointF(tx + ox, 258 + oy), title)
+    painter.setPen(QPen(_CSTUB_TITLE))
+    painter.drawText(QPointF(tx, 258), title)
+
+    # Sub-text: "（廢棄）"
+    painter.setFont(_FONT_STUB_SUB)
+    fm2 = painter.fontMetrics()
+    sub = "（廢棄）"
+    sx  = GAME_W / 2 - fm2.horizontalAdvance(sub) / 2
+    painter.setPen(QPen(_CSTUB_SUB))
+    painter.drawText(QPointF(sx, 300), sub)
+
+
+# ── Shop stub ─────────────────────────────────────────────────────────────────
+
+def _draw_shop_stub(painter: QPainter, state: GameState):
+    """廢棄店面佔位畫面。"""
+    painter.setPen(Qt.NoPen)
+
+    # Background
+    painter.setBrush(QBrush(_CSTUB_BG))
+    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
+
+    # Counter / storefront frame
+    painter.setBrush(QBrush(_CSTUB_WOOD_D))
+    painter.drawRect(QRectF(160, 370, 480, 38))    # counter top
+    painter.drawRect(QRectF(160, 408, 480, 90))    # counter front panel
+    painter.setBrush(QBrush(_CSTUB_WOOD_L))
+    painter.drawRect(QRectF(160, 370, 480, 6))     # counter-top edge highlight
+
+    # Window/display frame above counter
+    painter.setBrush(QBrush(QColor(38, 32, 24, 200)))
+    painter.drawRect(QRectF(220, 200, 360, 155))   # window back
+    painter.setBrush(QBrush(_CSTUB_WOOD_D))
+    painter.drawRect(QRectF(215, 195, 370, 10))    # top frame
+    painter.drawRect(QRectF(215, 355, 370, 10))    # bottom frame
+    painter.drawRect(QRectF(215, 195, 10,  170))   # left frame
+    painter.drawRect(QRectF(575, 195, 10,  170))   # right frame
+    # Window cross bar
+    painter.drawRect(QRectF(395, 195, 10,  170))   # vertical divider
+    painter.drawRect(QRectF(215, 270, 370, 8))     # horizontal divider
+
+    # Shutter slats (closed)
+    painter.setBrush(QBrush(QColor(30, 24, 16, 170)))
+    for i in range(5):
+        painter.drawRect(QRectF(226, 205 + i * 25, 160, 14))   # left pane
+        painter.drawRect(QRectF(406, 205 + i * 25, 160, 14))   # right pane
+
+    # Dust
+    painter.setBrush(QBrush(_CSTUB_DUST))
+    painter.drawRect(QRectF(160, 370, 480, 10))
+
+    # ── Cobweb: top-right corner ────────────────────────────────────────────
+    web_pen = QPen(QColor(90, 85, 70, 90))
+    web_pen.setWidthF(1.0)
+    painter.setPen(web_pen)
+    for i in range(4):
+        painter.drawLine(
+            QPointF(GAME_W - 155 - i * 18, 130),
+            QPointF(GAME_W - 155,          130 + i * 18),
+        )
+    painter.setPen(Qt.NoPen)
+
+    # ── Title: "店面" ──────────────────────────────────────────────────────
+    painter.setFont(_FONT_STUB_TITLE)
+    fm = painter.fontMetrics()
+    title = "店面"
+    tx = GAME_W / 2 - fm.horizontalAdvance(title) / 2
+    painter.setPen(QPen(_CSTUB_SHADOW))
+    for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
+        painter.drawText(QPointF(tx + ox, 152 + oy), title)
+    painter.setPen(QPen(_CSTUB_TITLE))
+    painter.drawText(QPointF(tx, 152), title)
+
+    # Sub-text
+    painter.setFont(_FONT_STUB_SUB)
+    fm2 = painter.fontMetrics()
+    sub = "（廢棄）"
+    sx  = GAME_W / 2 - fm2.horizontalAdvance(sub) / 2
+    painter.setPen(QPen(_CSTUB_SUB))
+    painter.drawText(QPointF(sx, 192), sub)
