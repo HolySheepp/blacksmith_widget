@@ -71,6 +71,7 @@ def _autostart_set(enable: bool) -> None:
             subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
                 capture_output=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except Exception:
             pass
