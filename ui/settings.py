@@ -85,37 +85,51 @@ def _create_lnk(target_exe: str, lnk_path: str) -> None:
     IID_IPersistFile = _guid(0x0000010B, 0, 0, 0xC0,0,0,0,0,0,0,0x46)
 
     ole32 = ctypes.WinDLL("ole32")
-    ole32.CoInitialize(None)   # S_OK=0 or S_FALSE=1 (already init) — both fine
+
+    # S_OK(0)=we initialised COM, S_FALSE(1)=already initialised same model — both mean we
+    # own a reference and MUST call CoUninitialize.
+    # Negative (e.g. RPC_E_CHANGED_MODE=0x80010106): already initialised with a different
+    # apartment model — we did NOT add a reference, so we must NOT call CoUninitialize.
+    coinit_hr  = ole32.CoInitialize(None)
+    need_uninit = coinit_hr in (0, 1)
 
     psl = ctypes.c_void_p(None)
-    hr = ole32.CoCreateInstance(
-        ctypes.byref(CLSID_ShellLink), None, 1,   # 1 = CLSCTX_INPROC_SERVER
-        ctypes.byref(IID_IShellLinkW), ctypes.byref(psl),
-    )
-    if hr != 0:
-        ole32.CoUninitialize()
-        return
-
     try:
-        # IShellLinkW vtable: [9]=SetWorkingDirectory, [19]=SetPath
-        _vf(psl, 19, ctypes.c_long, ctypes.c_wchar_p)(psl, target_exe)
-        _vf(psl, 9,  ctypes.c_long, ctypes.c_wchar_p)(psl, os.path.dirname(target_exe))
+        hr = ole32.CoCreateInstance(
+            ctypes.byref(CLSID_ShellLink), None, 1,   # 1 = CLSCTX_INPROC_SERVER
+            ctypes.byref(IID_IShellLinkW), ctypes.byref(psl),
+        )
+        if hr != 0:
+            return
 
-        # QI for IPersistFile
-        ppf = ctypes.c_void_p(None)
-        hr = _vf(psl, 0, ctypes.c_long,
-                 ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)
-                 )(psl, ctypes.byref(IID_IPersistFile), ctypes.byref(ppf))
-        if hr == 0 and ppf:
+        try:
+            # IShellLinkW vtable: [9]=SetWorkingDirectory, [19]=SetPath
+            _vf(psl, 19, ctypes.c_long, ctypes.c_wchar_p)(psl, target_exe)
+            _vf(psl, 9,  ctypes.c_long, ctypes.c_wchar_p)(psl, os.path.dirname(target_exe))
+
+            # QI for IPersistFile
+            ppf = ctypes.c_void_p(None)
+            hr = _vf(psl, 0, ctypes.c_long,
+                     ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)
+                     )(psl, ctypes.byref(IID_IPersistFile), ctypes.byref(ppf))
+            if hr == 0 and ppf:
+                try:
+                    # IPersistFile vtable: [6]=Save
+                    _vf(ppf, 6, ctypes.c_long,
+                        ctypes.c_wchar_p, ctypes.c_int)(ppf, lnk_path, 1)
+                finally:
+                    try:
+                        _vf(ppf, 2, ctypes.c_ulong)(ppf)   # Release IPersistFile
+                    except Exception:
+                        pass
+        finally:
             try:
-                # IPersistFile vtable: [6]=Save
-                _vf(ppf, 6, ctypes.c_long,
-                    ctypes.c_wchar_p, ctypes.c_int)(ppf, lnk_path, 1)
-            finally:
-                _vf(ppf, 2, ctypes.c_ulong)(ppf)   # Release IPersistFile
+                _vf(psl, 2, ctypes.c_ulong)(psl)            # Release IShellLink
+            except Exception:
+                pass
     finally:
-        _vf(psl, 2, ctypes.c_ulong)(psl)            # Release IShellLink
-        ole32.CoUninitialize()
+        if need_uninit:
+            ole32.CoUninitialize()
 
 
 def _autostart_set(enable: bool) -> None:
