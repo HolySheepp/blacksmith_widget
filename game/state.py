@@ -9,7 +9,11 @@ Modes:
 import math
 import random
 from save import load_save
-from game.metal import MetalPiece, pick_metal, METAL_TYPES, SPAWN_DUR, FLASH_DUR
+from game.metal import MetalPiece, METAL_TYPES, SPAWN_DUR, FLASH_DUR
+from game.items import (
+    ITEMS, ITEMS_BY_ID, HAMMERS, ANVILS, CONTRACTS, BLUEPRINTS,
+    DELIVERY_CLICKS, COMMISSION_MARKUP, COMMISSION_MAX_QTY,
+)
 from config import (
     GAME_W, GAME_H,
     AX, AY_BASE, FACE_TOP, FACE_L, FACE_R,
@@ -176,6 +180,39 @@ class GameState:
         # Transient: 渦輪 fever 連打直線指示器（-1 = fever 尚未打擊）
         self.turbo_line_idx: int = -1
 
+        # ── Economy & upgrade system (saved) ──────────────────────────────
+        self.gold: int = int(_sv.get("gold", 0))
+        self.hammer_idx:   int = int(_sv.get("hammer_idx",   0))   # index into HAMMERS
+        self.anvil_idx:    int = int(_sv.get("anvil_idx",    0))   # index into ANVILS
+        self.contract_idx: int = int(_sv.get("contract_idx", 0))   # index into CONTRACTS
+        # Blueprints: set of item ids unlocked (stored as list in JSON)
+        _bp_raw = _sv.get("blueprints_owned", [])
+        self.blueprints_owned: set = set(_bp_raw) if _bp_raw else set()
+        # Item inventory: {item_id: count}
+        self.item_inventory: dict = dict(_sv.get("item_inventory", {}))
+
+        # Apply equipped hammer stats immediately
+        self._apply_hammer()
+        # Apply equipped anvil mode lock immediately
+        self._apply_anvil()
+
+        # ── Workstation crafting (transient — not saved mid-craft) ────────
+        self.craft_active:       bool = False
+        self.craft_item_id:      str  = ""
+        self.craft_progress:     int  = 0
+        self.craft_target:       int  = 0
+        self.craft_selected_idx: int  = 0   # which item is highlighted in UI
+
+        # ── Shop commissions & delivery (saved) ───────────────────────────
+        _comm = _sv.get("active_commission")
+        self.active_commission: dict | None = _comm if isinstance(_comm, dict) else None
+        if self.active_commission is None and self.shop_repaired:
+            self._generate_commission()
+
+        self.delivery_active:   bool = False
+        self.delivery_progress: int  = 0
+        self.delivery_target:   int  = DELIVERY_CLICKS
+
         # ── Metal forging system ───────────────────────────────────────────
         try:
             _fc = _sv.get("forge_counts", [])
@@ -247,9 +284,16 @@ class GameState:
         Always increments click_count.
         """
         if self.widget_idx != 0:
-            # 修復模式：鍵盤輸入推進進度（僅限正在修復的那個 widget）
-            if self.repair_active and self.widget_idx == self.repair_widget_idx:
-                self.on_repair_input()
+            if self.widget_idx == 1:                           # 工作站
+                if self.repair_active and self.repair_widget_idx == 1:
+                    self.on_repair_input()
+                elif self.craft_active:
+                    self.on_craft_input()
+            elif self.widget_idx == 2:                         # 店面
+                if self.repair_active and self.repair_widget_idx == 2:
+                    self.on_repair_input()
+                elif self.delivery_active:
+                    self.on_delivery_input()
             return
         self.click_count += 1
         # Every input raises input_heat — catches charge keypresses between hits
@@ -450,6 +494,190 @@ class GameState:
             return True
         return False
 
+    # ── Economy helpers ───────────────────────────────────────────────────────
+
+    def _apply_hammer(self):
+        """Sync crit_rate and hammer force multiplier from equipped hammer."""
+        h = HAMMERS[min(self.hammer_idx, len(HAMMERS) - 1)]
+        self.crit_rate         = h["crit_rate"]
+        self.hammer_force_mult = h["force_mult"]
+
+    def _apply_anvil(self):
+        """Lock/unlock game mode based on equipped anvil."""
+        a = ANVILS[min(self.anvil_idx, len(ANVILS) - 1)]
+        locked = a["mode"]  # None | "combo" | "turbo"
+        if locked == "combo":
+            self.turbo_mode = False
+            self.kb_mode    = "combo"
+        elif locked == "turbo":
+            self.turbo_mode = True
+            self.kb_mode    = "charge"
+        # None → free choice; leave as-is
+
+        # Apply fever-duration bonus for turbo anvil
+        bonus = a.get("bonus") or ""
+        if bonus.startswith("fever_duration_mult:"):
+            mult = float(bonus.split(":")[1])
+            from config import FEVER_DURATION
+            self.fever_duration = FEVER_DURATION * mult
+        else:
+            from config import FEVER_DURATION
+            self.fever_duration = FEVER_DURATION
+
+    def can_craft(self, item_id: str) -> bool:
+        """True if player has all materials for this item."""
+        it = ITEMS_BY_ID.get(item_id)
+        if it is None:
+            return False
+        return all(self.forge_counts[i] >= it["cost"][i]
+                   for i in range(len(it["cost"])))
+
+    def item_accessible(self, item_id: str) -> bool:
+        """True if item is either blueprint-free or blueprint has been bought."""
+        it = ITEMS_BY_ID.get(item_id)
+        if it is None:
+            return False
+        return (not it["blueprint_required"]) or (item_id in self.blueprints_owned)
+
+    def accessible_items(self) -> list:
+        """Return list of item dicts the player has unlocked."""
+        return [it for it in ITEMS if self.item_accessible(it["id"])]
+
+    # ── Workstation crafting ───────────────────────────────────────────────────
+
+    def try_start_craft(self, item_id: str) -> bool:
+        """Deduct materials and enter crafting mode. Returns True on success."""
+        if self.craft_active:
+            return False
+        if not self.item_accessible(item_id) or not self.can_craft(item_id):
+            return False
+        it = ITEMS_BY_ID[item_id]
+        for i, qty in enumerate(it["cost"]):
+            self.forge_counts[i] -= qty
+        self.craft_active   = True
+        self.craft_item_id  = item_id
+        self.craft_progress = 0
+        self.craft_target   = it["craft_clicks"]
+        return True
+
+    def on_craft_input(self) -> bool:
+        """Advance crafting by one click. Returns True when craft completes."""
+        if not self.craft_active:
+            return False
+        self.craft_progress += 1
+        if self.craft_progress >= self.craft_target:
+            self.craft_active = False
+            item_id = self.craft_item_id
+            self.item_inventory[item_id] = self.item_inventory.get(item_id, 0) + 1
+            self.craft_progress = 0
+            self.craft_target   = 0
+            self.craft_item_id  = ""
+            return True
+        return False
+
+    # ── Shop commissions & delivery ────────────────────────────────────────────
+
+    def _generate_commission(self):
+        """Pick a random commission from items the player can craft."""
+        available = self.accessible_items()
+        if not available:
+            self.active_commission = None
+            return
+        item = random.choice(available)
+        qty  = random.randint(1, COMMISSION_MAX_QTY)
+        self.active_commission = {
+            "item_id":    item["id"],
+            "item_name":  item["name"],
+            "quantity":   qty,
+            "gold_reward": int(item["sell_price"] * qty * COMMISSION_MARKUP),
+        }
+
+    def can_fulfill_commission(self) -> bool:
+        """True if player has enough items in inventory to fill the commission."""
+        c = self.active_commission
+        if c is None:
+            return False
+        have = self.item_inventory.get(c["item_id"], 0)
+        return have >= c["quantity"]
+
+    def try_start_delivery(self) -> bool:
+        """Begin delivery if commission is fulfillable and not already delivering."""
+        if self.delivery_active or not self.can_fulfill_commission():
+            return False
+        c = self.active_commission
+        self.item_inventory[c["item_id"]] -= c["quantity"]
+        if self.item_inventory[c["item_id"]] <= 0:
+            del self.item_inventory[c["item_id"]]
+        self.delivery_active   = True
+        self.delivery_progress = 0
+        self.delivery_target   = DELIVERY_CLICKS
+        return True
+
+    def on_delivery_input(self) -> bool:
+        """Advance delivery. Returns True when delivery completes (gold awarded)."""
+        if not self.delivery_active:
+            return False
+        self.delivery_progress += 1
+        if self.delivery_progress >= self.delivery_target:
+            self.gold              += self.active_commission["gold_reward"]
+            self.delivery_active   = False
+            self.delivery_progress = 0
+            self.active_commission = None
+            self._generate_commission()
+            return True
+        return False
+
+    # ── Shop purchases ─────────────────────────────────────────────────────────
+
+    def try_buy(self, category: str, idx: int) -> bool:
+        """Buy a shop item. category: 'hammer'|'anvil'|'contract'|'blueprint'.
+        Returns True on success."""
+        if category == "hammer":
+            if idx <= self.hammer_idx or idx >= len(HAMMERS):
+                return False
+            price = HAMMERS[idx]["price"]
+            if self.gold < price:
+                return False
+            self.gold        -= price
+            self.hammer_idx   = idx
+            self._apply_hammer()
+            return True
+
+        if category == "anvil":
+            if idx == self.anvil_idx or idx >= len(ANVILS):
+                return False
+            price = ANVILS[idx]["price"]
+            if self.gold < price:
+                return False
+            self.gold      -= price
+            self.anvil_idx  = idx
+            self._apply_anvil()
+            return True
+
+        if category == "contract":
+            if idx <= self.contract_idx or idx >= len(CONTRACTS):
+                return False
+            price = CONTRACTS[idx]["price"]
+            if self.gold < price:
+                return False
+            self.gold         -= price
+            self.contract_idx  = idx
+            return True
+
+        if category == "blueprint":
+            if idx >= len(BLUEPRINTS):
+                return False
+            bp = BLUEPRINTS[idx]
+            if bp["unlocks"] in self.blueprints_owned:
+                return False
+            if self.gold < bp["price"]:
+                return False
+            self.gold -= bp["price"]
+            self.blueprints_owned.add(bp["unlocks"])
+            return True
+
+        return False
+
     def to_save(self) -> dict:
         return {
             "hit_count":               self.hit_count,
@@ -487,6 +715,14 @@ class GameState:
             "widget_idx":              self.widget_idx,
             "workstation_repaired":    self.workstation_repaired,
             "shop_repaired":           self.shop_repaired,
+            # Economy
+            "gold":                    self.gold,
+            "hammer_idx":              self.hammer_idx,
+            "anvil_idx":               self.anvil_idx,
+            "contract_idx":            self.contract_idx,
+            "blueprints_owned":        list(self.blueprints_owned),
+            "item_inventory":          dict(self.item_inventory),
+            "active_commission":       self.active_commission,
         }
 
     def _metal_to_save(self) -> dict | None:
@@ -590,6 +826,25 @@ class GameState:
         self.embers               = []
         self._ember_accum         = 0.0
         self.input_heat           = 0.0
+        # Economy
+        self.gold                 = 0
+        self.hammer_idx           = 0
+        self.anvil_idx            = 0
+        self.contract_idx         = 0
+        self.blueprints_owned     = set()
+        self.item_inventory       = {}
+        self.active_commission    = None
+        self.hammer_force_mult    = 1.0
+        self.craft_active         = False
+        self.craft_item_id        = ""
+        self.craft_progress       = 0
+        self.craft_target         = 0
+        self.craft_selected_idx   = 0
+        self.delivery_active      = False
+        self.delivery_progress    = 0
+        self.delivery_target      = DELIVERY_CLICKS
+        self._apply_hammer()
+        self._apply_anvil()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -732,9 +987,10 @@ class GameState:
         # Pre-compute charge for feature 2 popup (before typing_charge is reset below)
         _charge_n_popup = (max(1, self.typing_charge)
                            if self.kb_mode in ("charge", "charge_legacy") else 1)
-        # Metal force — same unit as force_count increment; captured before reset
-        _metal_force = (_charge_n_popup if self.kb_mode in ("charge", "charge_legacy")
+        # Metal force — base value scaled by equipped hammer's force multiplier
+        _base_force  = (_charge_n_popup if self.kb_mode in ("charge", "charge_legacy")
                         else 1)
+        _metal_force = _base_force * getattr(self, "hammer_force_mult", 1.0)
         # Actual visual hit surface Y: top of metal when visible, else anvil face
         _m = self.current_metal
         if (self.show_metal_forge and not self.hide_anvil
@@ -845,8 +1101,10 @@ class GameState:
         return (intensity, charge_mult)
 
     def _spawn_metal(self):
-        """Spawn a new metal piece on the anvil (weighted random type)."""
-        self.current_metal = MetalPiece(pick_metal())
+        """Spawn a new metal piece on the anvil, using the equipped contract's weights."""
+        weights = list(CONTRACTS[self.contract_idx]["weights"])
+        type_idx = random.choices(range(len(METAL_TYPES)), weights=weights)[0]
+        self.current_metal = MetalPiece(type_idx)
 
     def _enter_fever(self):
         """Enter Fever state: switch to combo mode for fever_duration seconds."""
