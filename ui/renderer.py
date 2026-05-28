@@ -229,12 +229,14 @@ _SHADOW_OFS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 # Screen zones for click detection (see widget.py _check_arrow_click):
 #   Left:  x < 45 px,  Right: x > 435 px,  Y: 90–270 px (≈ 150–450 game).
 
-_NAV_L_TIP  = QPointF( 18, 300)   # left  arrow tip (pointing ◀)
-_NAV_L_TOP  = QPointF( 72, 252)   # left  arrow top-right corner
-_NAV_L_BOT  = QPointF( 72, 348)   # left  arrow bot-right corner
-_NAV_R_TIP  = QPointF(782, 300)   # right arrow tip (pointing ▶)
-_NAV_R_TOP  = QPointF(728, 252)   # right arrow top-left corner
-_NAV_R_BOT  = QPointF(728, 348)   # right arrow bot-left corner
+# Arrows sit just outside the anvil/content area (~x 250-530 game).
+# Screen positions at SCALE=0.6: left base≈123 px, right base≈357 px.
+_NAV_L_TIP  = QPointF(145, 300)   # left  arrow tip (pointing ◀)
+_NAV_L_TOP  = QPointF(205, 258)   # left  arrow top-right corner
+_NAV_L_BOT  = QPointF(205, 342)   # left  arrow bot-right corner
+_NAV_R_TIP  = QPointF(655, 300)   # right arrow tip (pointing ▶)
+_NAV_R_TOP  = QPointF(595, 258)   # right arrow top-left corner
+_NAV_R_BOT  = QPointF(595, 342)   # right arrow bot-left corner
 _POLY_NAV_L = QPolygonF([_NAV_L_TIP, _NAV_L_TOP, _NAV_L_BOT])
 _POLY_NAV_R = QPolygonF([_NAV_R_TIP, _NAV_R_TOP, _NAV_R_BOT])
 
@@ -1068,8 +1070,8 @@ def _draw_nav_arrows(painter: QPainter, state: GameState):
 
     # ── Near-invisible click areas (alpha=2 makes edge pixels hit-testable) ──
     painter.setBrush(QBrush(QColor(0, 0, 0, 2)))
-    painter.drawRect(QRectF(0,             150, 90,  300))   # left zone
-    painter.drawRect(QRectF(GAME_W - 90,   150, 90,  300))   # right zone
+    painter.drawRect(QRectF(0,           150, 215, 300))   # left zone  (0–205 game = 0–123 px)
+    painter.drawRect(QRectF(585,         150, 215, 300))   # right zone (595–800 game = 357–480 px)
 
     # ── Arrow fill (white with moderate transparency) ──────────────────────
     arrow_col = QColor(220, 215, 200, 170)
@@ -1118,135 +1120,219 @@ def _draw_nav_arrows(painter: QPainter, state: GameState):
     painter.drawText(QPointF(nx, ny), name)
 
 
-# ── Workstation stub ──────────────────────────────────────────────────────────
+# ── Workstation stub (abandoned, no background, anvil-sized) ─────────────────
 
 def _draw_workstation_stub(painter: QPainter, state: GameState):
-    """廢棄工作站佔位畫面。"""
+    """廢棄工作站：透明背景，與鐵砧差不多大的破舊工作台。"""
     painter.setPen(Qt.NoPen)
 
-    # Background
-    painter.setBrush(QBrush(_CSTUB_BG))
-    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
+    # ── Drop shadow (matches anvil style) ─────────────────────────────────
+    painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
+    painter.drawEllipse(QPointF(AX, AY_BASE + 6), 132, 8)
 
-    # Workbench: table top + two legs + lower shelf
+    # ── Table top (slightly warped — left end droops) ──────────────────────
+    # dark weathered wood, same x-range as anvil face ±15
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(185, 358, 430, 32))    # table top
-    painter.drawRect(QRectF(208, 390, 28, 110))    # left leg
-    painter.drawRect(QRectF(563, 390, 28, 110))    # right leg
-    painter.setBrush(QBrush(_CSTUB_WOOD_L))
-    painter.drawRect(QRectF(228, 456, 342, 20))    # shelf
-    # Table top highlight edge
-    painter.setBrush(QBrush(QColor(80, 58, 28, 120)))
-    painter.drawRect(QRectF(185, 358, 430, 6))
+    painter.drawPolygon(_poly([
+        (252, 374), (530, 370),   # top edge (right end slightly higher = warped)
+        (530, 398), (252, 403),   # bottom edge
+    ]))
+    # Top-edge worn highlight
+    painter.setBrush(QBrush(QColor(68, 46, 18, 110)))
+    painter.drawPolygon(_poly([
+        (252, 374), (530, 370), (530, 377), (252, 381),
+    ]))
+    # Wood grain (3 faint lines)
+    grain_pen = QPen(QColor(25, 14, 4, 90))
+    grain_pen.setWidthF(1.0)
+    painter.setPen(grain_pen)
+    for i in range(3):
+        ox = 295 + i * 75
+        painter.drawLine(QPointF(ox, 376), QPointF(ox + 8, 396))
+    # Crack across surface
+    crack_pen = QPen(QColor(16, 8, 2, 200))
+    crack_pen.setWidthF(1.5)
+    painter.setPen(crack_pen)
+    painter.drawLine(QPointF(368, 374), QPointF(382, 402))
+    painter.setPen(Qt.NoPen)
 
-    # Scattered items on the table (simple rectangles = tools)
-    painter.setBrush(QBrush(QColor(58, 48, 38, 160)))
-    painter.drawRect(QRectF(240, 336, 55, 22))    # block 1
-    painter.drawRect(QRectF(460, 330, 18, 28))    # rod 1
-    painter.drawRect(QRectF(390, 340, 80, 12))    # plank
-    painter.setBrush(QBrush(QColor(72, 60, 44, 140)))
-    painter.drawRect(QRectF(310, 338, 30, 20))    # block 2
+    # ── Legs ──────────────────────────────────────────────────────────────
+    painter.setBrush(QBrush(QColor(36, 22, 8, 235)))
+    # Left leg: slightly tilted (broken feel) — parallelogram
+    painter.drawPolygon(_poly([
+        (266, 403), (292, 403), (295, 489), (262, 489),
+    ]))
+    # Right leg: straight but thinner at bottom (weathered)
+    painter.drawPolygon(_poly([
+        (506, 398), (528, 398), (525, 489), (508, 489),
+    ]))
 
-    # Dust accumulation overlay
+    # ── Lower shelf (sagging in the middle) ───────────────────────────────
+    painter.setBrush(QBrush(QColor(30, 18, 5, 210)))
+    painter.drawPolygon(_poly([
+        (278, 452), (520, 454),   # top edge
+        (518, 468), (280, 467),   # bottom edge (slight sag)
+    ]))
+
+    # ── Scattered items on the table (dust-covered) ───────────────────────
+    painter.setBrush(QBrush(QColor(50, 38, 24, 150)))
+    painter.drawRect(QRectF(295, 352, 42, 22))    # small block
+    painter.drawRect(QRectF(448, 348, 14, 26))    # rod
+    painter.setBrush(QBrush(QColor(42, 30, 14, 120)))
+    painter.drawRect(QRectF(360, 355, 62, 10))    # flat plank
+
+    # Dust on table top
     painter.setBrush(QBrush(_CSTUB_DUST))
-    painter.drawRect(QRectF(185, 358, 430, 10))
+    painter.drawPolygon(_poly([
+        (252, 374), (530, 370), (530, 380), (252, 384),
+    ]))
 
-    # ── Cobweb (two diagonal lines in top-left corner) ─────────────────────
-    web_pen = QPen(QColor(90, 85, 70, 90))
-    web_pen.setWidthF(1.0)
+    # ── Cobweb (top-left corner of table) ─────────────────────────────────
+    web_pen = QPen(QColor(90, 85, 70, 75))
+    web_pen.setWidthF(0.8)
     painter.setPen(web_pen)
     for i in range(4):
         painter.drawLine(
-            QPointF(155 + i * 18, 130),
-            QPointF(155,          130 + i * 18),
+            QPointF(254 + i * 13, 375),
+            QPointF(254,          375 + i * 13),
         )
     painter.setPen(Qt.NoPen)
 
-    # ── Title: "工作站" ────────────────────────────────────────────────────
-    painter.setFont(_FONT_STUB_TITLE)
-    fm = painter.fontMetrics()
-    title = "工作站"
-    tx = GAME_W / 2 - fm.horizontalAdvance(title) / 2
-    painter.setPen(QPen(_CSTUB_SHADOW))
-    for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
-        painter.drawText(QPointF(tx + ox, 258 + oy), title)
-    painter.setPen(QPen(_CSTUB_TITLE))
-    painter.drawText(QPointF(tx, 258), title)
-
-    # Sub-text: "（廢棄）"
-    painter.setFont(_FONT_STUB_SUB)
-    fm2 = painter.fontMetrics()
-    sub = "（廢棄）"
-    sx  = GAME_W / 2 - fm2.horizontalAdvance(sub) / 2
-    painter.setPen(QPen(_CSTUB_SUB))
-    painter.drawText(QPointF(sx, 300), sub)
+    # ── Title above furniture ─────────────────────────────────────────────
+    _draw_stub_label(painter, "工作站", "（廢棄）", 285, 323)
 
 
-# ── Shop stub ─────────────────────────────────────────────────────────────────
+# ── Shop stub (abandoned, no background, anvil-sized) ────────────────────────
 
 def _draw_shop_stub(painter: QPainter, state: GameState):
-    """廢棄店面佔位畫面。"""
+    """廢棄店面：透明背景，與鐵砧差不多大的破舊攤位。"""
     painter.setPen(Qt.NoPen)
 
-    # Background
-    painter.setBrush(QBrush(_CSTUB_BG))
-    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
+    # ── Drop shadow ────────────────────────────────────────────────────────
+    painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
+    painter.drawEllipse(QPointF(AX, AY_BASE + 6), 132, 8)
 
-    # Counter / storefront frame
+    # ── Counter front panel (solid, tall) ──────────────────────────────────
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(160, 370, 480, 38))    # counter top
-    painter.drawRect(QRectF(160, 408, 480, 90))    # counter front panel
-    painter.setBrush(QBrush(_CSTUB_WOOD_L))
-    painter.drawRect(QRectF(160, 370, 480, 6))     # counter-top edge highlight
+    painter.drawRect(QRectF(253, 398, 276, 90))    # front face
 
-    # Window/display frame above counter
-    painter.setBrush(QBrush(QColor(38, 32, 24, 200)))
-    painter.drawRect(QRectF(220, 200, 360, 155))   # window back
+    # Horizontal plank lines on panel
+    plank_pen = QPen(QColor(20, 12, 4, 130))
+    plank_pen.setWidthF(1.0)
+    painter.setPen(plank_pen)
+    for i in range(3):
+        y = 420 + i * 22
+        painter.drawLine(QPointF(253, y), QPointF(529, y))
+    painter.setPen(Qt.NoPen)
+
+    # ── Counter top surface (warped) ──────────────────────────────────────
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(215, 195, 370, 10))    # top frame
-    painter.drawRect(QRectF(215, 355, 370, 10))    # bottom frame
-    painter.drawRect(QRectF(215, 195, 10,  170))   # left frame
-    painter.drawRect(QRectF(575, 195, 10,  170))   # right frame
-    # Window cross bar
-    painter.drawRect(QRectF(395, 195, 10,  170))   # vertical divider
-    painter.drawRect(QRectF(215, 270, 370, 8))     # horizontal divider
+    painter.drawPolygon(_poly([
+        (251, 372), (531, 368),   # top
+        (529, 400), (253, 404),   # bottom
+    ]))
+    # Worn top edge
+    painter.setBrush(QBrush(QColor(62, 42, 16, 110)))
+    painter.drawPolygon(_poly([
+        (251, 372), (531, 368), (531, 376), (251, 380),
+    ]))
+    # Crack
+    crack_pen = QPen(QColor(14, 8, 2, 190))
+    crack_pen.setWidthF(1.5)
+    painter.setPen(crack_pen)
+    painter.drawLine(QPointF(400, 372), QPointF(412, 404))
+    painter.setPen(Qt.NoPen)
 
-    # Shutter slats (closed)
-    painter.setBrush(QBrush(QColor(30, 24, 16, 170)))
-    for i in range(5):
-        painter.drawRect(QRectF(226, 205 + i * 25, 160, 14))   # left pane
-        painter.drawRect(QRectF(406, 205 + i * 25, 160, 14))   # right pane
+    # ── Broken board leaning against counter (diagonal) ───────────────────
+    painter.setBrush(QBrush(QColor(40, 24, 8, 200)))
+    painter.drawPolygon(_poly([
+        (248, 488), (262, 488),   # bottom
+        (318, 374), (306, 378),   # top
+    ]))
+    # Grain line on board
+    board_pen = QPen(QColor(20, 10, 2, 80))
+    board_pen.setWidthF(0.8)
+    painter.setPen(board_pen)
+    painter.drawLine(QPointF(255, 486), QPointF(311, 376))
+    painter.setPen(Qt.NoPen)
 
-    # Dust
+    # ── Dust ──────────────────────────────────────────────────────────────
     painter.setBrush(QBrush(_CSTUB_DUST))
-    painter.drawRect(QRectF(160, 370, 480, 10))
+    painter.drawPolygon(_poly([
+        (251, 372), (531, 368), (531, 378), (251, 382),
+    ]))
 
-    # ── Cobweb: top-right corner ────────────────────────────────────────────
-    web_pen = QPen(QColor(90, 85, 70, 90))
-    web_pen.setWidthF(1.0)
+    # ── Cobweb (top-right corner of counter) ──────────────────────────────
+    web_pen = QPen(QColor(90, 85, 70, 75))
+    web_pen.setWidthF(0.8)
     painter.setPen(web_pen)
     for i in range(4):
         painter.drawLine(
-            QPointF(GAME_W - 155 - i * 18, 130),
-            QPointF(GAME_W - 155,          130 + i * 18),
+            QPointF(528 - i * 13, 373),
+            QPointF(528,          373 + i * 13),
         )
     painter.setPen(Qt.NoPen)
 
-    # ── Title: "店面" ──────────────────────────────────────────────────────
+    # ── Title above furniture ─────────────────────────────────────────────
+    _draw_stub_label(painter, "店面", "（廢棄）", 285, 323)
+
+
+# ── Workstation / shop full (unlocked, repaired — future use) ─────────────────
+
+def _draw_workstation_full(painter: QPainter, state: GameState):
+    """修好的工作站（保留供未來使用）。"""
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(_CSTUB_BG))
+    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
+    painter.setBrush(QBrush(_CSTUB_WOOD_D))
+    painter.drawRect(QRectF(185, 358, 430, 32))
+    painter.drawRect(QRectF(208, 390, 28, 110))
+    painter.drawRect(QRectF(563, 390, 28, 110))
+    painter.setBrush(QBrush(_CSTUB_WOOD_L))
+    painter.drawRect(QRectF(228, 456, 342, 20))
+    painter.setBrush(QBrush(QColor(80, 58, 28, 120)))
+    painter.drawRect(QRectF(185, 358, 430, 6))
+    painter.setBrush(QBrush(QColor(58, 48, 38, 160)))
+    for rx, ry, rw, rh in [(240,336,55,22),(460,330,18,28),(390,340,80,12)]:
+        painter.drawRect(QRectF(rx, ry, rw, rh))
+    _draw_stub_label(painter, "工作站", "", 258, 0)
+
+
+def _draw_shop_full(painter: QPainter, state: GameState):
+    """修好的店面（保留供未來使用）。"""
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(_CSTUB_BG))
+    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
+    painter.setBrush(QBrush(_CSTUB_WOOD_D))
+    painter.drawRect(QRectF(160, 370, 480, 38))
+    painter.drawRect(QRectF(160, 408, 480, 90))
+    painter.setBrush(QBrush(_CSTUB_WOOD_L))
+    painter.drawRect(QRectF(160, 370, 480, 6))
+    painter.setBrush(QBrush(QColor(38, 32, 24, 200)))
+    painter.drawRect(QRectF(220, 200, 360, 155))
+    painter.setBrush(QBrush(_CSTUB_WOOD_D))
+    for rx, ry, rw, rh in [(215,195,370,10),(215,355,370,10),(215,195,10,170),
+                            (575,195,10,170),(395,195,10,170),(215,270,370,8)]:
+        painter.drawRect(QRectF(rx, ry, rw, rh))
+    _draw_stub_label(painter, "店面", "", 152, 0)
+
+
+# ── Shared stub label helper ──────────────────────────────────────────────────
+
+def _draw_stub_label(painter: QPainter, title: str, sub: str,
+                     title_y: float, sub_y: float):
+    """Draw title + optional subtitle centred horizontally."""
     painter.setFont(_FONT_STUB_TITLE)
     fm = painter.fontMetrics()
-    title = "店面"
     tx = GAME_W / 2 - fm.horizontalAdvance(title) / 2
     painter.setPen(QPen(_CSTUB_SHADOW))
     for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
-        painter.drawText(QPointF(tx + ox, 152 + oy), title)
+        painter.drawText(QPointF(tx + ox, title_y + oy), title)
     painter.setPen(QPen(_CSTUB_TITLE))
-    painter.drawText(QPointF(tx, 152), title)
-
-    # Sub-text
-    painter.setFont(_FONT_STUB_SUB)
-    fm2 = painter.fontMetrics()
-    sub = "（廢棄）"
-    sx  = GAME_W / 2 - fm2.horizontalAdvance(sub) / 2
-    painter.setPen(QPen(_CSTUB_SUB))
-    painter.drawText(QPointF(sx, 192), sub)
+    painter.drawText(QPointF(tx, title_y), title)
+    if sub and sub_y:
+        painter.setFont(_FONT_STUB_SUB)
+        fm2 = painter.fontMetrics()
+        sx = GAME_W / 2 - fm2.horizontalAdvance(sub) / 2
+        painter.setPen(QPen(_CSTUB_SUB))
+        painter.drawText(QPointF(sx, sub_y), sub)

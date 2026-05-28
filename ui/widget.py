@@ -357,10 +357,10 @@ class BlacksmithWidget(QWidget):
             self._press_local  = None
 
     # Arrow click zones (screen pixels; match _NAV_L/R geometry in renderer.py scaled by ui_scale)
-    # Renderer draws arrows in game-space at x≈18–72 (left) and x≈728–782 (right), y≈252–348.
-    # At default SCALE=0.6: left zone x<45, right zone x>435, y in [90, 270] screen px.
-    # We use slightly generous thresholds so the feel is forgiving at any ui_scale.
-    _ARROW_W  = 50   # screen-pixel width of each side's click zone
+    # Renderer draws arrows in game-space at x≈145–205 (left) and x≈595–655 (right), y≈258–342.
+    # At default SCALE=0.6: left base≈123 px, right base≈357 px from left edge.
+    # Zone extends from widget edge to just past the arrow base for a forgiving hit area.
+    _ARROW_W  = 128  # screen-pixel width of each side's click zone
     _ARROW_Y1 = 80   # top of vertical window for arrow clicks  (screen px)
     _ARROW_Y2 = 280  # bottom of vertical window for arrow clicks (screen px)
 
