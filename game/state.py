@@ -545,6 +545,15 @@ class GameState:
 
     # ── Workstation crafting ───────────────────────────────────────────────────
 
+    def cycle_craft_item(self, delta: int):
+        """Shift the highlighted item index; ignored while a craft is in progress."""
+        if self.craft_active:
+            return
+        items = self.accessible_items()
+        if not items:
+            return
+        self.craft_selected_idx = (self.craft_selected_idx + delta) % len(items)
+
     def try_start_craft(self, item_id: str) -> bool:
         """Deduct materials and enter crafting mode. Returns True on success."""
         if self.craft_active:

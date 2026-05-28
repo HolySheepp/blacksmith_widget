@@ -351,8 +351,12 @@ class BlacksmithWidget(QWidget):
         if event.button() == Qt.LeftButton:
             if not self._is_dragging and self._press_local is not None:
                 arrow_hit = self._check_arrow_click(event.pos())
-                if not arrow_hit and self.state.widget_idx in (1, 2):
-                    self._on_stub_click()
+                if not arrow_hit:
+                    idx = self.state.widget_idx
+                    if idx == 1:
+                        self._on_workstation_click(event.pos())
+                    elif idx == 2:
+                        self._on_shop_click(event.pos())
             self._is_dragging  = False
             self._press_global = None
             self._drag_offset  = None
@@ -379,20 +383,69 @@ class BlacksmithWidget(QWidget):
             return True
         return False
 
-    def _on_stub_click(self):
-        """Handle a non-arrow left click on a stub widget (workstation or shop)."""
-        s   = self.state
-        idx = s.widget_idx
-        is_repaired = (s.workstation_repaired if idx == 1 else s.shop_repaired)
-        if is_repaired:
+    # ── Workstation click ─────────────────────────────────────────────────────
+
+    # Nav-button zones (screen px); mirror _WS_NAV_L/R_CX and _WS_NAV_R from renderer
+    # game→screen at default SCALE=0.6: L centre=168 px, R centre=312 px, radius≈13 px
+    _WS_NAV_L_X1 = 143   # left  button: screen x range [143, 194]
+    _WS_NAV_L_X2 = 194
+    _WS_NAV_R_X1 = 286   # right button: screen x range [286, 337]
+    _WS_NAV_R_X2 = 337
+    _WS_NAV_Y1   = 50    # buttons: screen y range  [50, 80]
+    _WS_NAV_Y2   = 80
+
+    def _on_workstation_click(self, pos: QPoint):
+        s = self.state
+        if not s.workstation_repaired:
+            # Still a stub — repair flow
+            if s.repair_active and s.repair_widget_idx == 1:
+                if s.on_repair_input():
+                    write_save(s.to_save())
+            else:
+                s.try_start_repair()
+            self.update()
             return
-        if s.repair_active and s.repair_widget_idx == idx:
-            completed = s.on_repair_input()
-            if completed:
-                write_save(s.to_save())   # persist immediately on completion
-        else:
-            s.try_start_repair()
+
+        # Repaired — crafting interaction
+        sx, sy = pos.x(), pos.y()
+
+        if s.craft_active:
+            # Any click advances the craft
+            if s.on_craft_input():
+                write_save(s.to_save())
+            self.update()
+            return
+
+        # Not crafting — check nav buttons first
+        if (self._WS_NAV_Y1 <= sy <= self._WS_NAV_Y2 and
+                self._WS_NAV_L_X1 <= sx <= self._WS_NAV_L_X2):
+            s.cycle_craft_item(-1)
+            self.update()
+            return
+        if (self._WS_NAV_Y1 <= sy <= self._WS_NAV_Y2 and
+                self._WS_NAV_R_X1 <= sx <= self._WS_NAV_R_X2):
+            s.cycle_craft_item(+1)
+            self.update()
+            return
+
+        # Any other click → try to start crafting selected item
+        items = s.accessible_items()
+        if items:
+            sel = min(s.craft_selected_idx, len(items) - 1)
+            s.try_start_craft(items[sel]["id"])
         self.update()
+
+    # ── Shop click (stub repair only for now — full UI next) ──────────────────
+
+    def _on_shop_click(self, pos: QPoint):
+        s = self.state
+        if not s.shop_repaired:
+            if s.repair_active and s.repair_widget_idx == 2:
+                if s.on_repair_input():
+                    write_save(s.to_save())
+            else:
+                s.try_start_repair()
+            self.update()
 
     def _switch_widget(self, delta: int):
         """Cycle widget_idx by delta (±1) and trigger a repaint."""

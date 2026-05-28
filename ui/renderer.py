@@ -265,6 +265,34 @@ _CSTUB_SUB       = QColor(85,  75, 55, 185)
 _CSTUB_DUST      = QColor(90,  80, 60,  55)
 _CSTUB_SHADOW    = QColor(0,   0,  0,  190)
 
+# ── Workstation / Shop full UI ────────────────────────────────────────────────
+_FONT_WS_ITEM    = QFont("Segoe UI", 22)
+_FONT_WS_ITEM.setBold(True)
+_FONT_WS_LABEL   = QFont("Segoe UI", 13)
+_FONT_WS_LABEL.setBold(True)
+_FONT_WS_SMALL   = QFont("Segoe UI", 12)
+_FONT_WS_HINT    = QFont("Segoe UI", 13)
+
+_CWS_PANEL      = QColor(18, 13, 7,   195)    # panel background
+_CWS_PANEL_BOR  = QColor(90, 65, 30,  160)    # panel border
+_CWS_ITEM_NAME  = QColor(232, 200, 120, 230)   # item title (warm gold)
+_CWS_MAT_OK     = QColor(140, 210, 120, 220)   # material — have enough
+_CWS_MAT_NO     = QColor(210, 100,  80, 200)   # material — not enough
+_CWS_NAVBTN     = QColor(100, 78, 40,  180)    # nav button fill
+_CWS_NAVBTN_ACT = QColor(160, 120, 55, 210)    # nav button hover/active
+_CWS_BAR_BG     = QColor(15,  10,  5,  200)    # progress bar background
+_CWS_BAR_FILL   = QColor(200, 130, 30,  230)   # progress bar fill
+_CWS_INV        = QColor(160, 160, 140, 200)   # inventory count text
+_CWS_HINT_OK    = QColor(120, 200, 100, 210)   # "click to craft" hint
+_CWS_HINT_NO    = QColor(180,  90,  60, 190)   # "materials missing" hint
+_CWS_CRAFTING   = QColor(220, 170,  50, 230)   # "crafting…" status
+
+# Nav button geometry (game space) — x range safe from widget-nav arrow zones
+_WS_NAV_L_CX = 280   # left  arrow button centre x
+_WS_NAV_R_CX = 520   # right arrow button centre x
+_WS_NAV_CY   = 105   # both arrows centre y
+_WS_NAV_R    = 22    # button circle radius
+
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -1311,15 +1339,17 @@ def _draw_shop_stub(painter: QPainter, state: GameState):
 # ── Workstation / shop full (unlocked, repaired — future use) ─────────────────
 
 def _draw_workstation_full(painter: QPainter, state: GameState):
-    """修好的工作站（透明背景，緊湊尺寸，供未來解鎖後使用）。"""
+    """修好的工作站——工作台家具 + 製作 UI。"""
+    from game.items import ITEMS_BY_ID, METAL_TYPES as _MIT
+    from game.metal import METAL_TYPES as _MTYPES
+
     painter.setPen(Qt.NoPen)
 
-    # Table top — clean, flat, well-made
+    # ── Table furniture (same proportions as stub) ────────────────────────
     painter.setBrush(QBrush(_CSTUB_WOOD_L))
-    painter.drawRect(QRectF(252, 338, 278, 30))   # main surface
+    painter.drawRect(QRectF(252, 338, 278, 30))
     painter.setBrush(QBrush(QColor(78, 54, 22, 130)))
-    painter.drawRect(QRectF(252, 338, 278, 5))    # top-edge highlight
-    # Wood grain
+    painter.drawRect(QRectF(252, 338, 278, 5))
     grain_pen = QPen(QColor(35, 20, 6, 70))
     grain_pen.setWidthF(0.8)
     painter.setPen(grain_pen)
@@ -1327,22 +1357,127 @@ def _draw_workstation_full(painter: QPainter, state: GameState):
         ox = 280 + i * 58
         painter.drawLine(QPointF(ox, 340), QPointF(ox + 4, 366))
     painter.setPen(Qt.NoPen)
-
-    # Legs — straight and sturdy
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(264, 368, 24, 120))   # left leg
-    painter.drawRect(QRectF(506, 368, 24, 120))   # right leg
-
-    # Lower shelf — straight
+    painter.drawRect(QRectF(264, 368, 24, 120))
+    painter.drawRect(QRectF(506, 368, 24, 120))
     painter.setBrush(QBrush(QColor(44, 28, 10, 220)))
     painter.drawRect(QRectF(278, 422, 234, 18))
 
-    # Items on the table (tools, neatly placed)
-    painter.setBrush(QBrush(QColor(62, 50, 32, 180)))
-    painter.drawRect(QRectF(288, 318, 48, 20))    # block
-    painter.drawRect(QRectF(452, 314, 12, 24))    # rod
-    painter.setBrush(QBrush(QColor(50, 38, 18, 150)))
-    painter.drawRect(QRectF(355, 322, 68, 10))    # plank
+    # ── Gather item data ──────────────────────────────────────────────────
+    items = state.accessible_items()
+    if not items:
+        return
+    sel_idx  = min(state.craft_selected_idx, len(items) - 1)
+    item     = items[sel_idx]
+    item_id  = item["id"]
+    cost     = item["cost"]
+    in_stock = [state.forge_counts[i] if i < len(state.forge_counts) else 0
+                for i in range(len(cost))]
+    can_make = all(in_stock[i] >= cost[i] for i in range(len(cost)))
+    inv_cnt  = state.item_inventory.get(item_id, 0)
+
+    cx = float(GAME_W / 2)   # 400
+
+    # ── Info panel background ─────────────────────────────────────────────
+    panel_rect = QRectF(220, 58, 360, 268)
+    painter.setBrush(QBrush(_CWS_PANEL))
+    pen_bor = QPen(_CWS_PANEL_BOR)
+    pen_bor.setWidthF(1.2)
+    painter.setPen(pen_bor)
+    painter.drawRoundedRect(panel_rect, 8, 8)
+    painter.setPen(Qt.NoPen)
+
+    # ── Item name ─────────────────────────────────────────────────────────
+    painter.setPen(QPen(_CWS_ITEM_NAME))
+    painter.setFont(_FONT_WS_ITEM)
+    painter.drawText(
+        QRectF(316, 65, 168, 44),
+        Qt.AlignCenter, item["name"],
+    )
+
+    # ── Nav arrow buttons ◀ ▶ ────────────────────────────────────────────
+    for cx_btn, label in ((_WS_NAV_L_CX, "◀"), (_WS_NAV_R_CX, "▶")):
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(_CWS_NAVBTN))
+        painter.drawEllipse(QPointF(cx_btn, _WS_NAV_CY), _WS_NAV_R, _WS_NAV_R)
+        painter.setPen(QPen(_CWS_ITEM_NAME))
+        painter.setFont(_FONT_WS_LABEL)
+        painter.drawText(
+            QRectF(cx_btn - _WS_NAV_R, _WS_NAV_CY - _WS_NAV_R,
+                   _WS_NAV_R * 2, _WS_NAV_R * 2),
+            Qt.AlignCenter, label,
+        )
+
+    # Item counter e.g. "2 / 7"
+    painter.setPen(QPen(_CWS_INV))
+    painter.setFont(_FONT_WS_SMALL)
+    painter.drawText(
+        QRectF(316, 122, 168, 22),
+        Qt.AlignCenter, f"{sel_idx + 1} / {len(items)}",
+    )
+
+    # ── Material requirements ─────────────────────────────────────────────
+    required = [(i, cost[i]) for i in range(len(cost)) if cost[i] > 0]
+    painter.setPen(QPen(_CWS_ITEM_NAME))
+    painter.setFont(_FONT_WS_SMALL)
+    painter.drawText(QRectF(240, 150, 320, 22), Qt.AlignCenter, "── 所需材料 ──")
+
+    row_y = 174
+    for (i, needed) in required:
+        have   = in_stock[i]
+        enough = have >= needed
+        col    = _CWS_MAT_OK if enough else _CWS_MAT_NO
+        name   = _MTYPES[i]["name"]
+        # Colour dot
+        painter.setPen(Qt.NoPen)
+        dot_col = QColor(*_MTYPES[i]["cold_color"])
+        dot_col.setAlpha(200)
+        painter.setBrush(QBrush(dot_col))
+        painter.drawEllipse(QPointF(296, row_y + 8), 7, 7)
+        # Text
+        painter.setPen(QPen(col))
+        painter.setFont(_FONT_WS_LABEL)
+        painter.drawText(QRectF(310, row_y, 180, 22), Qt.AlignLeft | Qt.AlignVCenter,
+                         f"{name}   {have} / {needed}")
+        row_y += 26
+
+    # ── Inventory ─────────────────────────────────────────────────────────
+    painter.setPen(QPen(_CWS_INV))
+    painter.setFont(_FONT_WS_SMALL)
+    painter.drawText(QRectF(240, row_y + 4, 320, 22),
+                     Qt.AlignCenter, f"庫存：{inv_cnt} 件")
+
+    # ── Progress bar (crafting active) ────────────────────────────────────
+    bar_y = 270
+    bar_w = 300.0
+    bar_h = 14.0
+    bar_x = cx - bar_w / 2
+
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(_CWS_BAR_BG))
+    painter.drawRoundedRect(QRectF(bar_x, bar_y, bar_w, bar_h), 4, 4)
+
+    if state.craft_active:
+        prog  = state.craft_progress / max(1, state.craft_target)
+        fill  = min(1.0, prog)
+        painter.setBrush(QBrush(_CWS_BAR_FILL))
+        painter.drawRoundedRect(QRectF(bar_x, bar_y, bar_w * fill, bar_h), 4, 4)
+
+    # ── Status / hint text ────────────────────────────────────────────────
+    painter.setFont(_FONT_WS_HINT)
+    if state.craft_active:
+        pct = int(state.craft_progress / max(1, state.craft_target) * 100)
+        painter.setPen(QPen(_CWS_CRAFTING))
+        painter.drawText(QRectF(240, 290, 320, 24),
+                         Qt.AlignCenter, f"製作中…  {pct}%")
+    elif can_make:
+        painter.setPen(QPen(_CWS_HINT_OK))
+        painter.drawText(QRectF(240, 290, 320, 24),
+                         Qt.AlignCenter, "點擊開始製作")
+    else:
+        painter.setPen(QPen(_CWS_HINT_NO))
+        painter.drawText(QRectF(240, 290, 320, 24),
+                         Qt.AlignCenter, "材料不足")
 
 
 def _draw_shop_full(painter: QPainter, state: GameState):
