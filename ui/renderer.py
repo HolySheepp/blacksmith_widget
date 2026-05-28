@@ -241,9 +241,9 @@ _POLY_NAV_L = QPolygonF([_NAV_L_TIP, _NAV_L_TOP, _NAV_L_BOT])
 _POLY_NAV_R = QPolygonF([_NAV_R_TIP, _NAV_R_TOP, _NAV_R_BOT])
 
 # Nav dot indicator — sits just below the object (AY_BASE≈490, stub bottom≈490)
-# _NAV_DOT_CY=540 game → 324 screen; label baseline at 522 game → 313 screen
-# (text top ≈302 screen, object bottom ≈299 screen → ~3 px gap, feels "flush")
-_NAV_DOT_CY    = 540
+# _NAV_DOT_CY=524 game → 314 screen; label baseline at 506 game → 304 screen
+# (dots/label hug object bottom at ~293 screen → ~11 px gap)
+_NAV_DOT_CY    = 524
 _NAV_DOT_R     = 7.0
 _NAV_DOT_GAP   = 28
 _NAV_DOT_CX    = [GAME_W / 2 + (i - 1) * _NAV_DOT_GAP for i in range(3)]
@@ -1136,13 +1136,13 @@ def _draw_workstation_stub(painter: QPainter, state: GameState):
     # dark weathered wood, same x-range as anvil face ±15
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
     painter.drawPolygon(_poly([
-        (252, 374), (530, 370),   # top edge (right end slightly higher = warped)
-        (530, 398), (252, 403),   # bottom edge
+        (252, 344), (530, 340),   # top edge (right end slightly higher = warped)
+        (530, 368), (252, 373),   # bottom edge
     ]))
     # Top-edge worn highlight
     painter.setBrush(QBrush(QColor(68, 46, 18, 110)))
     painter.drawPolygon(_poly([
-        (252, 374), (530, 370), (530, 377), (252, 381),
+        (252, 344), (530, 340), (530, 347), (252, 351),
     ]))
     # Wood grain (3 faint lines)
     grain_pen = QPen(QColor(25, 14, 4, 90))
@@ -1150,43 +1150,43 @@ def _draw_workstation_stub(painter: QPainter, state: GameState):
     painter.setPen(grain_pen)
     for i in range(3):
         ox = 295 + i * 75
-        painter.drawLine(QPointF(ox, 376), QPointF(ox + 8, 396))
+        painter.drawLine(QPointF(ox, 346), QPointF(ox + 8, 366))
     # Crack across surface
     crack_pen = QPen(QColor(16, 8, 2, 200))
     crack_pen.setWidthF(1.5)
     painter.setPen(crack_pen)
-    painter.drawLine(QPointF(368, 374), QPointF(382, 402))
+    painter.drawLine(QPointF(368, 344), QPointF(382, 372))
     painter.setPen(Qt.NoPen)
 
     # ── Legs ──────────────────────────────────────────────────────────────
     painter.setBrush(QBrush(QColor(36, 22, 8, 235)))
     # Left leg: slightly tilted (broken feel) — parallelogram
     painter.drawPolygon(_poly([
-        (266, 403), (292, 403), (295, 489), (262, 489),
+        (266, 373), (292, 373), (295, 489), (262, 489),
     ]))
     # Right leg: straight but thinner at bottom (weathered)
     painter.drawPolygon(_poly([
-        (506, 398), (528, 398), (525, 489), (508, 489),
+        (506, 368), (528, 368), (525, 489), (508, 489),
     ]))
 
     # ── Lower shelf (sagging in the middle) ───────────────────────────────
     painter.setBrush(QBrush(QColor(30, 18, 5, 210)))
     painter.drawPolygon(_poly([
-        (278, 452), (520, 454),   # top edge
-        (518, 468), (280, 467),   # bottom edge (slight sag)
+        (278, 422), (520, 424),   # top edge
+        (518, 438), (280, 437),   # bottom edge (slight sag)
     ]))
 
     # ── Scattered items on the table (dust-covered) ───────────────────────
     painter.setBrush(QBrush(QColor(50, 38, 24, 150)))
-    painter.drawRect(QRectF(295, 352, 42, 22))    # small block
-    painter.drawRect(QRectF(448, 348, 14, 26))    # rod
+    painter.drawRect(QRectF(295, 322, 42, 22))    # small block
+    painter.drawRect(QRectF(448, 318, 14, 26))    # rod
     painter.setBrush(QBrush(QColor(42, 30, 14, 120)))
-    painter.drawRect(QRectF(360, 355, 62, 10))    # flat plank
+    painter.drawRect(QRectF(360, 325, 62, 10))    # flat plank
 
     # Dust on table top
     painter.setBrush(QBrush(_CSTUB_DUST))
     painter.drawPolygon(_poly([
-        (252, 374), (530, 370), (530, 380), (252, 384),
+        (252, 344), (530, 340), (530, 350), (252, 354),
     ]))
 
     # ── Cobweb (top-left corner of table) ─────────────────────────────────
@@ -1195,8 +1195,8 @@ def _draw_workstation_stub(painter: QPainter, state: GameState):
     painter.setPen(web_pen)
     for i in range(4):
         painter.drawLine(
-            QPointF(254 + i * 13, 375),
-            QPointF(254,          375 + i * 13),
+            QPointF(254 + i * 13, 345),
+            QPointF(254,          345 + i * 13),
         )
     painter.setPen(Qt.NoPen)
 
@@ -1213,52 +1213,52 @@ def _draw_shop_stub(painter: QPainter, state: GameState):
 
     # ── Counter front panel (solid, tall) ──────────────────────────────────
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(253, 398, 276, 90))    # front face
+    painter.drawRect(QRectF(253, 368, 276, 120))   # front face
 
     # Horizontal plank lines on panel
     plank_pen = QPen(QColor(20, 12, 4, 130))
     plank_pen.setWidthF(1.0)
     painter.setPen(plank_pen)
     for i in range(3):
-        y = 420 + i * 22
+        y = 390 + i * 22
         painter.drawLine(QPointF(253, y), QPointF(529, y))
     painter.setPen(Qt.NoPen)
 
     # ── Counter top surface (warped) ──────────────────────────────────────
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
     painter.drawPolygon(_poly([
-        (251, 372), (531, 368),   # top
-        (529, 400), (253, 404),   # bottom
+        (251, 342), (531, 338),   # top
+        (529, 370), (253, 374),   # bottom
     ]))
     # Worn top edge
     painter.setBrush(QBrush(QColor(62, 42, 16, 110)))
     painter.drawPolygon(_poly([
-        (251, 372), (531, 368), (531, 376), (251, 380),
+        (251, 342), (531, 338), (531, 346), (251, 350),
     ]))
     # Crack
     crack_pen = QPen(QColor(14, 8, 2, 190))
     crack_pen.setWidthF(1.5)
     painter.setPen(crack_pen)
-    painter.drawLine(QPointF(400, 372), QPointF(412, 404))
+    painter.drawLine(QPointF(400, 342), QPointF(412, 374))
     painter.setPen(Qt.NoPen)
 
     # ── Broken board leaning against counter (diagonal) ───────────────────
     painter.setBrush(QBrush(QColor(40, 24, 8, 200)))
     painter.drawPolygon(_poly([
         (248, 488), (262, 488),   # bottom
-        (318, 374), (306, 378),   # top
+        (318, 344), (306, 348),   # top
     ]))
     # Grain line on board
     board_pen = QPen(QColor(20, 10, 2, 80))
     board_pen.setWidthF(0.8)
     painter.setPen(board_pen)
-    painter.drawLine(QPointF(255, 486), QPointF(311, 376))
+    painter.drawLine(QPointF(255, 486), QPointF(311, 346))
     painter.setPen(Qt.NoPen)
 
     # ── Dust ──────────────────────────────────────────────────────────────
     painter.setBrush(QBrush(_CSTUB_DUST))
     painter.drawPolygon(_poly([
-        (251, 372), (531, 368), (531, 378), (251, 382),
+        (251, 342), (531, 338), (531, 348), (251, 352),
     ]))
 
     # ── Cobweb (top-right corner of counter) ──────────────────────────────
@@ -1267,8 +1267,8 @@ def _draw_shop_stub(painter: QPainter, state: GameState):
     painter.setPen(web_pen)
     for i in range(4):
         painter.drawLine(
-            QPointF(528 - i * 13, 373),
-            QPointF(528,          373 + i * 13),
+            QPointF(528 - i * 13, 343),
+            QPointF(528,          343 + i * 13),
         )
     painter.setPen(Qt.NoPen)
 
@@ -1285,33 +1285,33 @@ def _draw_workstation_full(painter: QPainter, state: GameState):
 
     # Table top — clean, flat, well-made
     painter.setBrush(QBrush(_CSTUB_WOOD_L))
-    painter.drawRect(QRectF(252, 368, 278, 30))   # main surface
+    painter.drawRect(QRectF(252, 338, 278, 30))   # main surface
     painter.setBrush(QBrush(QColor(78, 54, 22, 130)))
-    painter.drawRect(QRectF(252, 368, 278, 5))    # top-edge highlight
+    painter.drawRect(QRectF(252, 338, 278, 5))    # top-edge highlight
     # Wood grain
     grain_pen = QPen(QColor(35, 20, 6, 70))
     grain_pen.setWidthF(0.8)
     painter.setPen(grain_pen)
     for i in range(4):
         ox = 280 + i * 58
-        painter.drawLine(QPointF(ox, 370), QPointF(ox + 4, 396))
+        painter.drawLine(QPointF(ox, 340), QPointF(ox + 4, 366))
     painter.setPen(Qt.NoPen)
 
     # Legs — straight and sturdy
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(264, 398, 24, 90))    # left leg
-    painter.drawRect(QRectF(506, 398, 24, 90))    # right leg
+    painter.drawRect(QRectF(264, 368, 24, 120))   # left leg
+    painter.drawRect(QRectF(506, 368, 24, 120))   # right leg
 
     # Lower shelf — straight
     painter.setBrush(QBrush(QColor(44, 28, 10, 220)))
-    painter.drawRect(QRectF(278, 452, 234, 18))
+    painter.drawRect(QRectF(278, 422, 234, 18))
 
     # Items on the table (tools, neatly placed)
     painter.setBrush(QBrush(QColor(62, 50, 32, 180)))
-    painter.drawRect(QRectF(288, 348, 48, 20))    # block
-    painter.drawRect(QRectF(452, 344, 12, 24))    # rod
+    painter.drawRect(QRectF(288, 318, 48, 20))    # block
+    painter.drawRect(QRectF(452, 314, 12, 24))    # rod
     painter.setBrush(QBrush(QColor(50, 38, 18, 150)))
-    painter.drawRect(QRectF(355, 352, 68, 10))    # plank
+    painter.drawRect(QRectF(355, 322, 68, 10))    # plank
 
 
 def _draw_shop_full(painter: QPainter, state: GameState):
