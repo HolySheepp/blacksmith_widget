@@ -22,7 +22,6 @@ from config import (
     TYPING_BASE_MS, TYPING_MAX_CHARGE,
     FEVER_THRESHOLD, FEVER_DURATION, FEVER_COOLDOWN,
     CHARGE_EX_LIFT, CHARGE_EX_IDLE_MS,
-    REPAIR_MAT_PER_HITS,
     REPAIR_WORKSTATION_COST, REPAIR_WORKSTATION_HITS,
     REPAIR_SHOP_COST, REPAIR_SHOP_HITS,
     get_charge_color,
@@ -163,8 +162,7 @@ class GameState:
         self.widget_idx: int = int(_sv.get("widget_idx", 0))
 
         # ── Repair system ──────────────────────────────────────────────────
-        # 鐵錠 (iron ingots) — accumulated from anvil hits, spent to repair
-        self.materials:            int  = int(_sv.get("materials",            0))
+        # Materials = sum(forge_counts) — completed metals forged on the anvil.
         self.workstation_repaired: bool = bool(_sv.get("workstation_repaired", False))
         self.shop_repaired:        bool = bool(_sv.get("shop_repaired",        False))
         # Repair mode (transient — not saved)
@@ -172,7 +170,6 @@ class GameState:
         self.repair_progress:    int  = 0     # clicks done so far
         self.repair_target:      int  = 0     # clicks needed to finish
         self.repair_widget_idx:  int  = 0     # which widget is being repaired
-        self._mat_hit_accum:     int  = 0     # hit counter toward next ingot
 
         # Transient: 連打模式三角點指示器（-1 = 尚未打擊，無亮點）
         self.combo_dot_idx: int  = -1
@@ -384,8 +381,9 @@ class GameState:
         return hit_result
 
     def try_start_repair(self) -> bool:
-        """Try to spend materials and enter repair mode for the current stub widget.
-        Returns True if repair has started (materials deducted)."""
+        """Try to spend forged metals and enter repair mode for the current stub widget.
+        Materials = sum(forge_counts).  Deducts from lowest metal type first.
+        Returns True if repair has started (forge_counts deducted)."""
         idx = self.widget_idx
         if idx == 1 and not self.workstation_repaired:
             cost, hits = REPAIR_WORKSTATION_COST, REPAIR_WORKSTATION_HITS
@@ -393,9 +391,16 @@ class GameState:
             cost, hits = REPAIR_SHOP_COST, REPAIR_SHOP_HITS
         else:
             return False
-        if self.materials < cost:
-            return False   # insufficient — caller shows existing material display
-        self.materials        -= cost
+        if sum(self.forge_counts) < cost:
+            return False   # insufficient forged metals
+        # Deduct from forge_counts starting at lowest type (index 0)
+        remaining = cost
+        for i in range(len(self.forge_counts)):
+            if remaining <= 0:
+                break
+            take = min(self.forge_counts[i], remaining)
+            self.forge_counts[i] -= take
+            remaining            -= take
         self.repair_active     = True
         self.repair_progress   = 0
         self.repair_target     = hits
@@ -454,7 +459,6 @@ class GameState:
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,
             "widget_idx":              self.widget_idx,
-            "materials":               self.materials,
             "workstation_repaired":    self.workstation_repaired,
             "shop_repaired":           self.shop_repaired,
         }
@@ -551,14 +555,12 @@ class GameState:
         self.turbo_line_idx = -1
         self.widget_idx     = 0
         # Repair system
-        self.materials            = 0
         self.workstation_repaired = False
         self.shop_repaired        = False
         self.repair_active        = False
         self.repair_progress      = 0
         self.repair_target        = 0
         self.repair_widget_idx    = 0
-        self._mat_hit_accum       = 0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -725,11 +727,6 @@ class GameState:
         self.has_hit      = True
         self.hit_cooldown = 380.0
         self.hit_count   += 1
-        # Material (鐵錠) accumulation — every REPAIR_MAT_PER_HITS hits yields 1 ingot
-        self._mat_hit_accum += 1
-        if self._mat_hit_accum >= REPAIR_MAT_PER_HITS:
-            self._mat_hit_accum = 0
-            self.materials += 1
 
         if self.kb_mode == "charge":
             self.typing_cooldown = 120.0          # short cooldown — just enough for visual

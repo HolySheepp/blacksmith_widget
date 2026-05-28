@@ -1385,8 +1385,9 @@ def _draw_repair_overlay(painter: QPainter, state: GameState,
 
     else:
         # ── Material check ─────────────────────────────────────────────────
-        has_mats = state.materials >= cost
-        mat_text = f"{state.materials} / {cost}"
+        total_forged = sum(state.forge_counts)
+        has_mats = total_forged >= cost
+        mat_text = f"{total_forged} / {cost}"
 
         painter.setFont(_FONT_REPAIR)
         fm = painter.fontMetrics()
