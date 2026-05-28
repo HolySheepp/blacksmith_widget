@@ -678,7 +678,8 @@ class BlacksmithWidget(QWidget):
             browser.setMarkdown(notes)
         else:
             browser.setPlainText("（沒有附上更新說明）")
-        browser.setMinimumHeight(200)
+        browser.setMinimumHeight(160)
+        browser.setMaximumHeight(340)   # cap height; overflow scrolls inside the browser
         layout.addWidget(browser)
 
         # Buttons
