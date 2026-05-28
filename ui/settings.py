@@ -103,8 +103,10 @@ def _create_lnk(target_exe: str, lnk_path: str) -> None:
             return
 
         try:
-            # IShellLinkW vtable: [9]=SetWorkingDirectory, [19]=SetPath
-            _vf(psl, 19, ctypes.c_long, ctypes.c_wchar_p)(psl, target_exe)
+            # IShellLinkW vtable (after 3 IUnknown slots):
+            #   3=GetPath, 8=GetWorkingDirectory, 9=SetWorkingDirectory,
+            #   19=Resolve, 20=SetPath
+            _vf(psl, 20, ctypes.c_long, ctypes.c_wchar_p)(psl, target_exe)
             _vf(psl, 9,  ctypes.c_long, ctypes.c_wchar_p)(psl, os.path.dirname(target_exe))
 
             # QI for IPersistFile
