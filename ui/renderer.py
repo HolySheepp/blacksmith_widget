@@ -240,8 +240,10 @@ _NAV_R_BOT  = QPointF(595, 342)   # right arrow bot-left corner
 _POLY_NAV_L = QPolygonF([_NAV_L_TIP, _NAV_L_TOP, _NAV_L_BOT])
 _POLY_NAV_R = QPolygonF([_NAV_R_TIP, _NAV_R_TOP, _NAV_R_BOT])
 
-# Nav dot indicator (bottom-centre)
-_NAV_DOT_CY    = 570
+# Nav dot indicator — sits just below the object (AY_BASE≈490, stub bottom≈490)
+# _NAV_DOT_CY=540 game → 324 screen; label baseline at 522 game → 313 screen
+# (text top ≈302 screen, object bottom ≈299 screen → ~3 px gap, feels "flush")
+_NAV_DOT_CY    = 540
 _NAV_DOT_R     = 7.0
 _NAV_DOT_GAP   = 28
 _NAV_DOT_CX    = [GAME_W / 2 + (i - 1) * _NAV_DOT_GAP for i in range(3)]
@@ -1073,9 +1075,9 @@ def _draw_nav_arrows(painter: QPainter, state: GameState):
     painter.drawRect(QRectF(0,           150, 215, 300))   # left zone  (0–205 game = 0–123 px)
     painter.drawRect(QRectF(585,         150, 215, 300))   # right zone (595–800 game = 357–480 px)
 
-    # ── Arrow fill (white with moderate transparency) ──────────────────────
-    arrow_col = QColor(220, 215, 200, 170)
-    shadow_col = QColor(0, 0, 0, 100)
+    # ── Arrow fill — match anvil gray (#5c5c5f) ───────────────────────────
+    arrow_col  = QColor(92, 92, 95, 210)
+    shadow_col = QColor(0,  0,  0, 80)
 
     # Left arrow shadow, then fill
     painter.setBrush(QBrush(shadow_col))
@@ -1101,22 +1103,22 @@ def _draw_nav_arrows(painter: QPainter, state: GameState):
     _WIDGET_NAMES = ["鐵砧", "工作站", "店面"]
     for i, cx in enumerate(_NAV_DOT_CX):
         if i == widget_idx:
-            painter.setBrush(QBrush(QColor(220, 200, 150, 220)))
+            painter.setBrush(QBrush(QColor(92, 92, 95, 230)))
             painter.drawEllipse(QPointF(cx, _NAV_DOT_CY), _NAV_DOT_R, _NAV_DOT_R)
         else:
-            painter.setBrush(QBrush(QColor(100, 90, 70, 140)))
-            painter.drawEllipse(QPointF(cx, _NAV_DOT_CY), _NAV_DOT_R * 0.65, _NAV_DOT_R * 0.65)
+            painter.setBrush(QBrush(QColor(92, 92, 95, 110)))
+            painter.drawEllipse(QPointF(cx, _NAV_DOT_CY), _NAV_DOT_R * 0.6, _NAV_DOT_R * 0.6)
 
-    # ── Current widget name (small, above dots) ────────────────────────────
+    # ── Current widget name (just above dots, hugging object bottom) ───────
     painter.setFont(_FONT_STUB_SUB)
     fm = painter.fontMetrics()
     name = _WIDGET_NAMES[widget_idx]
     nx   = GAME_W / 2 - fm.horizontalAdvance(name) / 2
     ny   = float(_NAV_DOT_CY - 18)
-    painter.setPen(QPen(QColor(0, 0, 0, 150)))
+    painter.setPen(QPen(QColor(0, 0, 0, 130)))
     for ox, oy in _SHADOW_OFS:
         painter.drawText(QPointF(nx + ox, ny + oy), name)
-    painter.setPen(QPen(QColor(200, 185, 140, 190)))
+    painter.setPen(QPen(QColor(92, 92, 95, 200)))
     painter.drawText(QPointF(nx, ny), name)
 
 
@@ -1198,9 +1200,6 @@ def _draw_workstation_stub(painter: QPainter, state: GameState):
         )
     painter.setPen(Qt.NoPen)
 
-    # ── Title above furniture ─────────────────────────────────────────────
-    _draw_stub_label(painter, "工作站", "（廢棄）", 285, 323)
-
 
 # ── Shop stub (abandoned, no background, anvil-sized) ────────────────────────
 
@@ -1273,29 +1272,46 @@ def _draw_shop_stub(painter: QPainter, state: GameState):
         )
     painter.setPen(Qt.NoPen)
 
-    # ── Title above furniture ─────────────────────────────────────────────
-    _draw_stub_label(painter, "店面", "（廢棄）", 285, 323)
-
 
 # ── Workstation / shop full (unlocked, repaired — future use) ─────────────────
 
 def _draw_workstation_full(painter: QPainter, state: GameState):
-    """修好的工作站（保留供未來使用）。"""
+    """修好的工作站（透明背景，緊湊尺寸，供未來解鎖後使用）。"""
     painter.setPen(Qt.NoPen)
-    painter.setBrush(QBrush(_CSTUB_BG))
-    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
-    painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(185, 358, 430, 32))
-    painter.drawRect(QRectF(208, 390, 28, 110))
-    painter.drawRect(QRectF(563, 390, 28, 110))
+
+    # Drop shadow
+    painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
+    painter.drawEllipse(QPointF(AX, AY_BASE + 6), 132, 8)
+
+    # Table top — clean, flat, well-made
     painter.setBrush(QBrush(_CSTUB_WOOD_L))
-    painter.drawRect(QRectF(228, 456, 342, 20))
-    painter.setBrush(QBrush(QColor(80, 58, 28, 120)))
-    painter.drawRect(QRectF(185, 358, 430, 6))
-    painter.setBrush(QBrush(QColor(58, 48, 38, 160)))
-    for rx, ry, rw, rh in [(240,336,55,22),(460,330,18,28),(390,340,80,12)]:
-        painter.drawRect(QRectF(rx, ry, rw, rh))
-    _draw_stub_label(painter, "工作站", "", 258, 0)
+    painter.drawRect(QRectF(252, 368, 278, 30))   # main surface
+    painter.setBrush(QBrush(QColor(78, 54, 22, 130)))
+    painter.drawRect(QRectF(252, 368, 278, 5))    # top-edge highlight
+    # Wood grain
+    grain_pen = QPen(QColor(35, 20, 6, 70))
+    grain_pen.setWidthF(0.8)
+    painter.setPen(grain_pen)
+    for i in range(4):
+        ox = 280 + i * 58
+        painter.drawLine(QPointF(ox, 370), QPointF(ox + 4, 396))
+    painter.setPen(Qt.NoPen)
+
+    # Legs — straight and sturdy
+    painter.setBrush(QBrush(_CSTUB_WOOD_D))
+    painter.drawRect(QRectF(264, 398, 24, 90))    # left leg
+    painter.drawRect(QRectF(506, 398, 24, 90))    # right leg
+
+    # Lower shelf — straight
+    painter.setBrush(QBrush(QColor(44, 28, 10, 220)))
+    painter.drawRect(QRectF(278, 452, 234, 18))
+
+    # Items on the table (tools, neatly placed)
+    painter.setBrush(QBrush(QColor(62, 50, 32, 180)))
+    painter.drawRect(QRectF(288, 348, 48, 20))    # block
+    painter.drawRect(QRectF(452, 344, 12, 24))    # rod
+    painter.setBrush(QBrush(QColor(50, 38, 18, 150)))
+    painter.drawRect(QRectF(355, 352, 68, 10))    # plank
 
 
 def _draw_shop_full(painter: QPainter, state: GameState):
@@ -1314,7 +1330,6 @@ def _draw_shop_full(painter: QPainter, state: GameState):
     for rx, ry, rw, rh in [(215,195,370,10),(215,355,370,10),(215,195,10,170),
                             (575,195,10,170),(395,195,10,170),(215,270,370,8)]:
         painter.drawRect(QRectF(rx, ry, rw, rh))
-    _draw_stub_label(painter, "店面", "", 152, 0)
 
 
 # ── Shared stub label helper ──────────────────────────────────────────────────
