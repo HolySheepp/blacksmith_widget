@@ -51,7 +51,7 @@ _UPDATE_MS     = 3_600_000   # hourly update check interval (ms)
 class BlacksmithWidget(QWidget):
 
     # Signals used to marshal results from background threads → main thread
-    _update_ready = pyqtSignal(str, str, bool)  # (tag, download_url, show_toast)
+    _update_ready = pyqtSignal(str, str, bool, str)  # (tag, download_url, show_toast, notes)
     _dl_progress  = pyqtSignal(int)             # download progress 0-100
     _dl_done      = pyqtSignal(bool)            # download finished (success?)
     _check_msg    = pyqtSignal(str, str)        # (title, body) info message
@@ -573,11 +573,14 @@ class BlacksmithWidget(QWidget):
         from config import VERSION
         info = upd.fetch_latest()
         if info and upd.is_newer(info["tag"], VERSION):
-            self._update_ready.emit(info["tag"], info["url"], is_startup)
+            self._update_ready.emit(
+                info["tag"], info["url"], is_startup,
+                info.get("notes", ""),
+            )
 
-    def _on_update_ready(self, tag: str, url: str, show_toast: bool):
+    def _on_update_ready(self, tag: str, url: str, show_toast: bool, notes: str):
         """Main thread: store pending update; optionally show toast bubble."""
-        self._pending_update = {"tag": tag, "url": url}
+        self._pending_update = {"tag": tag, "url": url, "notes": notes}
         if show_toast:
             self._show_update_toast(tag)
 
@@ -615,19 +618,51 @@ class BlacksmithWidget(QWidget):
         self._update_toast = toast  # prevent GC from destroying the window
 
     def _prompt_and_update(self):
-        """Called when player clicks the 'new version' menu item."""
+        """Called when player clicks the 'new version' menu item.
+        Shows a dialog with release notes and Yes/No buttons."""
         if not self._pending_update:
             return
-        tag = self._pending_update["tag"]
-        url = self._pending_update["url"]
+        tag   = self._pending_update["tag"]
+        url   = self._pending_update["url"]
+        notes = self._pending_update.get("notes", "")
         from config import VERSION
-        reply = QMessageBox.question(
-            self, "發現新版本",
-            f"目前版本：{VERSION}\n新版本：{tag}\n\n是否要現在下載並更新？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if reply == QMessageBox.Yes:
+        from PyQt5.QtWidgets import QTextBrowser, QDialogButtonBox
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("🆕  發現新版本")
+        dlg.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+        dlg.setMinimumWidth(420)
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(10)
+        layout.setContentsMargins(14, 12, 14, 14)
+
+        # Version header
+        header = QLabel(f"<b>目前版本：</b>{VERSION}　→　<b>新版本：</b>{tag}")
+        header.setTextFormat(Qt.RichText)
+        layout.addWidget(header)
+
+        # Release notes (Markdown rendered via QTextBrowser)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(False)
+        browser.setReadOnly(True)
+        if notes.strip():
+            browser.setMarkdown(notes)
+        else:
+            browser.setPlainText("（沒有附上更新說明）")
+        browser.setMinimumHeight(200)
+        layout.addWidget(browser)
+
+        # Buttons
+        buttons = QDialogButtonBox()
+        btn_update = buttons.addButton("立即更新", QDialogButtonBox.AcceptRole)
+        btn_later  = buttons.addButton("稍後",     QDialogButtonBox.RejectRole)
+        btn_update.setDefault(True)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        if dlg.exec_() == QDialog.Accepted:
             self._do_update(tag, url)
 
     def _do_update(self, tag: str, url: str):
@@ -747,7 +782,10 @@ class BlacksmithWidget(QWidget):
                 self._check_msg.emit("檢查更新", f"目前已是最新版本（{VERSION}）。")
             else:
                 # Store pending + tell user the menu button has changed
-                self._update_ready.emit(info["tag"], info["url"], False)
+                self._update_ready.emit(
+                    info["tag"], info["url"], False,
+                    info.get("notes", ""),
+                )
                 self._check_msg.emit(
                     "發現新版本",
                     f"找到新版本 {info['tag']}！\n右鍵選單中已出現更新按鈕，點擊即可安裝。",
