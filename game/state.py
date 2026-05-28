@@ -207,6 +207,10 @@ class GameState:
         # Last hit surface Y — updated each strike, used by renderer for sparks / flash
         self.last_hit_surface_y: float = float(FACE_TOP)
 
+        # ── Ambient ember particles (transient — not saved) ────────────────
+        self.embers: list = []
+        self._ember_accum: float = 0.0
+
         # ── Critical hit system ────────────────────────────────────────────
         self.crit_rate: float = float(_sv.get("crit_rate", 0.05))   # 0.0–1.0
         self.crit_mult: float = float(_sv.get("crit_mult", 3.0))    # force multiplier
@@ -377,6 +381,22 @@ class GameState:
             if s.life > 0 and s.y < _max_y:
                 alive.append(s)
         self.sparks = alive
+
+        # ── Ambient embers — float up from the hot anvil face ─────────────
+        if self.widget_idx == 0 and self.heat_level > 0.05:
+            # spawn rate: ~3 embers/sec at max heat, tapers off as forge cools
+            self._ember_accum += dt * self.heat_level * 3.0
+            while self._ember_accum >= 1.0:
+                self._ember_accum -= 1.0
+                self._spawn_ember()
+        alive_e = []
+        for e in self.embers:
+            e.x   += e.vx * dt
+            e.y   += e.vy * dt
+            e.life -= dt
+            if e.life > 0:
+                alive_e.append(e)
+        self.embers = alive_e
 
         return hit_result
 
@@ -558,6 +578,8 @@ class GameState:
         self.repair_progress      = 0
         self.repair_target        = 0
         self.repair_widget_idx    = 0
+        self.embers               = []
+        self._ember_accum         = 0.0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -856,3 +878,19 @@ class GameState:
             vx   = math.cos(a) * spd
             vy   = math.sin(a) * spd - 70
             self.sparks.append(Spark(sx, sy, vx, vy, life, size, color))
+
+    def _spawn_ember(self):
+        """Spawn one slow-rising ambient ember from the hot anvil face."""
+        # x: scattered across the anvil face; y: near the striking surface
+        x  = FACE_L + random.random() * (FACE_R - FACE_L)
+        y  = FACE_TOP - random.random() * 8       # just above the surface
+        vx = (random.random() - 0.5) * 20         # gentle sideways drift
+        vy = -(20 + random.random() * 55)          # slow upward float
+        life = 2.0 + random.random() * 2.5
+        size = 1.2 + random.random() * 2.2
+        # Ember colour: dark red → amber, warmer at higher heat
+        t = self.heat_level
+        r = int(140 + t * 115)   # 140–255
+        g = int(  8 + t *  82)   #   8–90
+        b = 0
+        self.embers.append(Spark(x, y, vx, vy, life, size, (r, g, b)))
