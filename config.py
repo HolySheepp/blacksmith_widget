@@ -86,9 +86,9 @@ FEVER_DURATION  = 20.0    # fever active duration (seconds)
 FEVER_COOLDOWN  = 75.0    # post-fever cooldown duration (seconds)
 
 # ── Repair mechanic ───────────────────────────────────────────────────────────
-# Materials = sum(forge_counts) — completed metal pieces forged on the anvil.
-# No separate material counter; forge_counts is already tracked and saved.
-REPAIR_WORKSTATION_COST = 10   # forged metals needed to start workstation repair
-REPAIR_WORKSTATION_HITS = 30   # click/key presses to complete workstation repair
-REPAIR_SHOP_COST        = 20   # forged metals needed to start shop repair
-REPAIR_SHOP_HITS        = 50   # click/key presses to complete shop repair
+# Cost tuples: (破銅, 爛鐵, 鐵, 鋼, 精金) — one entry per METAL_TYPES index.
+# Materials = forge_counts[i]; each type tracked and consumed independently.
+REPAIR_WORKSTATION_COST = (10,  5,  0, 0, 0)  # 破銅×10  爛鐵×5
+REPAIR_WORKSTATION_HITS = 30                   # click/key presses to complete
+REPAIR_SHOP_COST        = ( 0,  0,  5, 3, 0)  # 鐵×5  鋼×3
+REPAIR_SHOP_HITS        = 50                   # click/key presses to complete

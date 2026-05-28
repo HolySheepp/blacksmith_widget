@@ -26,6 +26,7 @@ from config import (
     get_charge_color,
 )
 from game.state import GameState
+from game.metal import METAL_TYPES as _METAL_TYPES
 
 
 # ── Pre-cached QColor constants (avoid per-frame allocation) ──────────────────
@@ -1408,31 +1409,43 @@ def _draw_repair_overlay(painter: QPainter, state: GameState,
         painter.setPen(Qt.NoPen)
 
     else:
-        # ── Material check ─────────────────────────────────────────────────
-        total_forged = sum(state.forge_counts)
-        has_mats = total_forged >= cost
-        mat_text = f"{total_forged} / {cost}"
+        # ── Material check — per-type display ──────────────────────────────
+        # Build list of required types (skip types with cost 0)
+        required = [(i, cost[i]) for i in range(len(cost)) if cost[i] > 0]
+        has_mats = all(
+            (state.forge_counts[i] if i < len(state.forge_counts) else 0) >= cost[i]
+            for i in range(len(cost))
+        )
 
-        painter.setFont(_FONT_REPAIR)
-        fm = painter.fontMetrics()
-        tx = cx - fm.horizontalAdvance(mat_text) / 2
-        ty = 380.0
-        mat_col = QColor(200, 160, 80, 240) if has_mats else QColor(140, 105, 55, 210)
-        painter.setPen(QPen(QColor(0, 0, 0, 150)))
-        for ox, oy in _SHADOW_OFS:
-            painter.drawText(QPointF(tx + ox, ty + oy), mat_text)
-        painter.setPen(QPen(mat_col))
-        painter.drawText(QPointF(tx, ty), mat_text)
-
-        # Hint text below fraction
-        hint = "點擊開始修復" if has_mats else "鐵錠不足"
+        # Draw each required type as "名稱  現有 / 需求"
         painter.setFont(_FONT_REPAIR_HINT)
-        fm2 = painter.fontMetrics()
-        tx2 = cx - fm2.horizontalAdvance(hint) / 2
-        ty2 = 398.0
-        hint_col = QColor(200, 160, 80, 180) if has_mats else QColor(92, 92, 95, 160)
+        fm = painter.fontMetrics()
+        line_h  = 20.0
+        start_y = 374.0 - (len(required) - 1) * line_h / 2   # vertically centred
+
+        for row, (i, needed) in enumerate(required):
+            have = state.forge_counts[i] if i < len(state.forge_counts) else 0
+            name = _METAL_TYPES[i]["name"]
+            text = f"{name}  {have} / {needed}"
+            ok   = have >= needed
+            tx   = cx - fm.horizontalAdvance(text) / 2
+            ty   = start_y + row * line_h
+            col  = (QColor(200, 160, 80, 230) if ok
+                    else QColor(140, 105, 55, 210))
+            painter.setPen(QPen(QColor(0, 0, 0, 130)))
+            for ox, oy in _SHADOW_OFS:
+                painter.drawText(QPointF(tx + ox, ty + oy), text)
+            painter.setPen(QPen(col))
+            painter.drawText(QPointF(tx, ty), text)
+
+        # Hint line below the list
+        hint     = "點擊開始修復" if has_mats else "材料不足"
+        hint_y   = start_y + len(required) * line_h + 2.0
+        tx2      = cx - fm.horizontalAdvance(hint) / 2
+        hint_col = (QColor(200, 160, 80, 180) if has_mats
+                    else QColor(92, 92, 95, 160))
         painter.setPen(QPen(hint_col))
-        painter.drawText(QPointF(tx2, ty2), hint)
+        painter.drawText(QPointF(tx2, hint_y), hint)
 
 
 # ── Shared stub label helper ──────────────────────────────────────────────────

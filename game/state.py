@@ -382,7 +382,8 @@ class GameState:
 
     def try_start_repair(self) -> bool:
         """Try to spend forged metals and enter repair mode for the current stub widget.
-        Materials = sum(forge_counts).  Deducts from lowest metal type first.
+        Cost is a tuple (破銅, 爛鐵, 鐵, 鋼, 精金); each type checked and deducted
+        independently from forge_counts.
         Returns True if repair has started (forge_counts deducted)."""
         idx = self.widget_idx
         if idx == 1 and not self.workstation_repaired:
@@ -391,16 +392,12 @@ class GameState:
             cost, hits = REPAIR_SHOP_COST, REPAIR_SHOP_HITS
         else:
             return False
-        if sum(self.forge_counts) < cost:
-            return False   # insufficient forged metals
-        # Deduct from forge_counts starting at lowest type (index 0)
-        remaining = cost
-        for i in range(len(self.forge_counts)):
-            if remaining <= 0:
-                break
-            take = min(self.forge_counts[i], remaining)
-            self.forge_counts[i] -= take
-            remaining            -= take
+        # Check every required type has sufficient stock
+        if not all(self.forge_counts[i] >= cost[i] for i in range(len(cost))):
+            return False
+        # Deduct each type individually
+        for i in range(len(cost)):
+            self.forge_counts[i] -= cost[i]
         self.repair_active     = True
         self.repair_progress   = 0
         self.repair_target     = hits
