@@ -88,7 +88,7 @@ FEVER_COOLDOWN  = 75.0    # post-fever cooldown duration (seconds)
 # ── Repair mechanic ───────────────────────────────────────────────────────────
 # Cost tuples: (破銅, 爛鐵, 鐵, 鋼, 精金) — one entry per METAL_TYPES index.
 # Materials = forge_counts[i]; each type tracked and consumed independently.
-REPAIR_WORKSTATION_COST = (200, 150, 50,  0,  0)  # 破銅×200  爛鐵×150  鐵×50  (~5天)
-REPAIR_WORKSTATION_HITS = 5000                    # click/key presses to complete
-REPAIR_SHOP_COST        = (  0,   0, 200, 80, 30) # 鐵×200  鋼×80  精金×30  (~12天)
-REPAIR_SHOP_HITS        = 8000                    # click/key presses to complete
+REPAIR_WORKSTATION_COST = (5000, 3500, 2000,    0,   0)  # 破銅×5000 爛鐵×3500 鐵×2000  (~4天 @20k點/天)
+REPAIR_WORKSTATION_HITS = 5000                          # click/key presses to complete
+REPAIR_SHOP_COST        = (   0,    0, 6000, 2000, 800) # 鐵×6000 鋼×2000 精金×800  (~9天 @20k點/天)
+REPAIR_SHOP_HITS        = 8000                          # click/key presses to complete
