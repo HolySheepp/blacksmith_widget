@@ -16,6 +16,8 @@ import ctypes
 import hashlib as _hlib
 import winreg
 
+from game.metal import METAL_TYPES as _METAL_TYPES
+
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QGroupBox, QFormLayout, QFrame,
@@ -294,6 +296,21 @@ class SettingsDialog(QDialog):
             center_btn.clicked.connect(self._center_cb)
             cl.addWidget(center_btn)
 
+        # Partial reset row
+        partial_row = QHBoxLayout()
+        reset_mats_btn = QPushButton("清空材料數量")
+        reset_mats_btn.setStyleSheet("color: #996600; font-weight: bold;")
+        reset_mats_btn.setToolTip("將所有已鍛造金屬的計數歸零")
+        reset_mats_btn.clicked.connect(self._confirm_reset_materials)
+        partial_row.addWidget(reset_mats_btn)
+
+        reset_repair_btn = QPushButton("重置修復狀態")
+        reset_repair_btn.setStyleSheet("color: #996600; font-weight: bold;")
+        reset_repair_btn.setToolTip("將工作站與店面恢復為未修復狀態")
+        reset_repair_btn.clicked.connect(self._confirm_reset_repair)
+        partial_row.addWidget(reset_repair_btn)
+        cl.addLayout(partial_row)
+
         # Reset save
         reset_btn = QPushButton("🗑  重置存檔")
         reset_btn.setStyleSheet("color: #cc3333; font-weight: bold;")
@@ -462,6 +479,35 @@ class SettingsDialog(QDialog):
                 self._devtools_cb()
         else:
             self._secret_input.clear()   # wrong code — clear silently, give no hint
+
+    def _confirm_reset_materials(self):
+        names = "、".join(m["name"] for m in _METAL_TYPES)
+        reply = QMessageBox.question(
+            self,
+            "確認清空材料",
+            f"這將把所有已鍛造金屬的計數（{names}）全部歸零。\n\n確定要清空嗎？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.state.forge_counts = [0] * len(_METAL_TYPES)
+
+    def _confirm_reset_repair(self):
+        reply = QMessageBox.question(
+            self,
+            "確認重置修復",
+            "這將把工作站與店面恢復為未修復狀態，正在進行中的修復也會取消。\n\n確定要重置嗎？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            s = self.state
+            s.workstation_repaired = False
+            s.shop_repaired        = False
+            s.repair_active        = False
+            s.repair_progress      = 0
+            s.repair_target        = 0
+            s.repair_widget_idx    = 0
 
     def _confirm_reset(self):
         reply = QMessageBox.question(
