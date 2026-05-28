@@ -84,3 +84,11 @@ CHARGE_EX_IDLE_MS  = 200.0   # ms of inactivity before auto-slam triggers
 FEVER_THRESHOLD = 2       # consecutive full-charge hits to trigger fever
 FEVER_DURATION  = 20.0    # fever active duration (seconds)
 FEVER_COOLDOWN  = 75.0    # post-fever cooldown duration (seconds)
+
+# ── Repair mechanic ───────────────────────────────────────────────────────────
+# Materials (鐵錠) are accumulated through hitting; displayed as small integers.
+REPAIR_MAT_PER_HITS     = 10   # anvil hits per 1 iron ingot gained
+REPAIR_WORKSTATION_COST = 10   # ingots needed to start workstation repair
+REPAIR_WORKSTATION_HITS = 30   # click/key presses to complete workstation repair
+REPAIR_SHOP_COST        = 20   # ingots needed to start shop repair
+REPAIR_SHOP_HITS        = 50   # click/key presses to complete shop repair

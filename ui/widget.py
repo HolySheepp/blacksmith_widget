@@ -350,7 +350,9 @@ class BlacksmithWidget(QWidget):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             if not self._is_dragging and self._press_local is not None:
-                self._check_arrow_click(event.pos())
+                arrow_hit = self._check_arrow_click(event.pos())
+                if not arrow_hit and self.state.widget_idx in (1, 2):
+                    self._on_stub_click()
             self._is_dragging  = False
             self._press_global = None
             self._drag_offset  = None
@@ -364,15 +366,33 @@ class BlacksmithWidget(QWidget):
     _ARROW_Y1 = 80   # top of vertical window for arrow clicks  (screen px)
     _ARROW_Y2 = 280  # bottom of vertical window for arrow clicks (screen px)
 
-    def _check_arrow_click(self, pos: QPoint):
-        """If the click landed in a nav-arrow zone, switch widget accordingly."""
+    def _check_arrow_click(self, pos: QPoint) -> bool:
+        """If the click landed in a nav-arrow zone, switch widget and return True."""
         x, y = pos.x(), pos.y()
         if not (self._ARROW_Y1 <= y <= self._ARROW_Y2):
-            return
+            return False
         if x < self._ARROW_W:
             self._switch_widget(-1)
+            return True
         elif x > WIDGET_W - self._ARROW_W:
             self._switch_widget(1)
+            return True
+        return False
+
+    def _on_stub_click(self):
+        """Handle a non-arrow left click on a stub widget (workstation or shop)."""
+        s   = self.state
+        idx = s.widget_idx
+        is_repaired = (s.workstation_repaired if idx == 1 else s.shop_repaired)
+        if is_repaired:
+            return
+        if s.repair_active and s.repair_widget_idx == idx:
+            completed = s.on_repair_input()
+            if completed:
+                write_save(s.to_save())   # persist immediately on completion
+        else:
+            s.try_start_repair()
+        self.update()
 
     def _switch_widget(self, delta: int):
         """Cycle widget_idx by delta (±1) and trigger a repaint."""

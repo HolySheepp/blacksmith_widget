@@ -22,6 +22,9 @@ from config import (
     TYPING_BASE_MS, TYPING_MAX_CHARGE,
     FEVER_THRESHOLD, FEVER_DURATION, FEVER_COOLDOWN,
     CHARGE_EX_LIFT, CHARGE_EX_IDLE_MS,
+    REPAIR_MAT_PER_HITS,
+    REPAIR_WORKSTATION_COST, REPAIR_WORKSTATION_HITS,
+    REPAIR_SHOP_COST, REPAIR_SHOP_HITS,
     get_charge_color,
 )
 
@@ -159,6 +162,18 @@ class GameState:
         # 0 = 鐵砧, 1 = 工作站, 2 = 店面
         self.widget_idx: int = int(_sv.get("widget_idx", 0))
 
+        # ── Repair system ──────────────────────────────────────────────────
+        # 鐵錠 (iron ingots) — accumulated from anvil hits, spent to repair
+        self.materials:            int  = int(_sv.get("materials",            0))
+        self.workstation_repaired: bool = bool(_sv.get("workstation_repaired", False))
+        self.shop_repaired:        bool = bool(_sv.get("shop_repaired",        False))
+        # Repair mode (transient — not saved)
+        self.repair_active:      bool = False
+        self.repair_progress:    int  = 0     # clicks done so far
+        self.repair_target:      int  = 0     # clicks needed to finish
+        self.repair_widget_idx:  int  = 0     # which widget is being repaired
+        self._mat_hit_accum:     int  = 0     # hit counter toward next ingot
+
         # Transient: 連打模式三角點指示器（-1 = 尚未打擊，無亮點）
         self.combo_dot_idx: int  = -1
         # Transient: 渦輪 fever 連打直線指示器（-1 = fever 尚未打擊）
@@ -228,7 +243,10 @@ class GameState:
         Always increments click_count.
         """
         if self.widget_idx != 0:
-            return   # 只有鐵砧 widget 接受輸入
+            # 修復模式：鍵盤輸入推進進度（僅限正在修復的那個 widget）
+            if self.repair_active and self.widget_idx == self.repair_widget_idx:
+                self.on_repair_input()
+            return
         self.click_count += 1
         if self.kb_mode == "combo":
             self._handle_combo_key()
@@ -365,6 +383,42 @@ class GameState:
 
         return hit_result
 
+    def try_start_repair(self) -> bool:
+        """Try to spend materials and enter repair mode for the current stub widget.
+        Returns True if repair has started (materials deducted)."""
+        idx = self.widget_idx
+        if idx == 1 and not self.workstation_repaired:
+            cost, hits = REPAIR_WORKSTATION_COST, REPAIR_WORKSTATION_HITS
+        elif idx == 2 and not self.shop_repaired:
+            cost, hits = REPAIR_SHOP_COST, REPAIR_SHOP_HITS
+        else:
+            return False
+        if self.materials < cost:
+            return False   # insufficient — caller shows existing material display
+        self.materials        -= cost
+        self.repair_active     = True
+        self.repair_progress   = 0
+        self.repair_target     = hits
+        self.repair_widget_idx = idx
+        return True
+
+    def on_repair_input(self) -> bool:
+        """Advance repair by one step (mouse click or key press).
+        Returns True if the repair just completed."""
+        if not self.repair_active:
+            return False
+        self.repair_progress += 1
+        if self.repair_progress >= self.repair_target:
+            if self.repair_widget_idx == 1:
+                self.workstation_repaired = True
+            elif self.repair_widget_idx == 2:
+                self.shop_repaired = True
+            self.repair_active   = False
+            self.repair_progress = 0
+            self.repair_target   = 0
+            return True
+        return False
+
     def to_save(self) -> dict:
         return {
             "hit_count":               self.hit_count,
@@ -400,6 +454,9 @@ class GameState:
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,
             "widget_idx":              self.widget_idx,
+            "materials":               self.materials,
+            "workstation_repaired":    self.workstation_repaired,
+            "shop_repaired":           self.shop_repaired,
         }
 
     def _metal_to_save(self) -> dict | None:
@@ -493,6 +550,15 @@ class GameState:
         self.combo_dot_idx  = -1
         self.turbo_line_idx = -1
         self.widget_idx     = 0
+        # Repair system
+        self.materials            = 0
+        self.workstation_repaired = False
+        self.shop_repaired        = False
+        self.repair_active        = False
+        self.repair_progress      = 0
+        self.repair_target        = 0
+        self.repair_widget_idx    = 0
+        self._mat_hit_accum       = 0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -659,6 +725,11 @@ class GameState:
         self.has_hit      = True
         self.hit_cooldown = 380.0
         self.hit_count   += 1
+        # Material (鐵錠) accumulation — every REPAIR_MAT_PER_HITS hits yields 1 ingot
+        self._mat_hit_accum += 1
+        if self._mat_hit_accum >= REPAIR_MAT_PER_HITS:
+            self._mat_hit_accum = 0
+            self.materials += 1
 
         if self.kb_mode == "charge":
             self.typing_cooldown = 120.0          # short cooldown — just enough for visual

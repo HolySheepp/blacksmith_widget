@@ -249,9 +249,12 @@ _NAV_DOT_GAP   = 28
 _NAV_DOT_CX    = [GAME_W / 2 + (i - 1) * _NAV_DOT_GAP for i in range(3)]
 
 # ── Stub screens (workstation / shop) ────────────────────────────────────────
-_FONT_STUB_TITLE = QFont("Segoe UI", 38)
+_FONT_STUB_TITLE  = QFont("Segoe UI", 38)
 _FONT_STUB_TITLE.setBold(True)
-_FONT_STUB_SUB   = QFont("Segoe UI", 19)
+_FONT_STUB_SUB    = QFont("Segoe UI", 19)
+_FONT_REPAIR      = QFont("Segoe UI", 16)
+_FONT_REPAIR.setBold(True)
+_FONT_REPAIR_HINT = QFont("Segoe UI", 13)
 
 _CSTUB_BG        = QColor(14, 11,  8,  230)
 _CSTUB_WOOD_D    = QColor(48, 33, 16,  210)
@@ -306,10 +309,16 @@ def draw_frame(painter: QPainter, state: GameState):
         _draw_hit_numbers(painter, state)
 
     elif widget_idx == 1:
-        _draw_workstation_stub(painter, state)
+        if state.workstation_repaired:
+            _draw_workstation_full(painter, state)
+        else:
+            _draw_workstation_stub(painter, state)
 
     elif widget_idx == 2:
-        _draw_shop_stub(painter, state)
+        if state.shop_repaired:
+            _draw_shop_full(painter, state)
+        else:
+            _draw_shop_stub(painter, state)
 
     # Navigation arrows + dot indicator — always shown when mouse is on widget
     if state.mouse_on_widget:
@@ -1196,6 +1205,10 @@ def _draw_workstation_stub(painter: QPainter, state: GameState):
         )
     painter.setPen(Qt.NoPen)
 
+    # ── Repair overlay (material count or progress bar) ────────────────────
+    from config import REPAIR_WORKSTATION_COST, REPAIR_WORKSTATION_HITS
+    _draw_repair_overlay(painter, state, REPAIR_WORKSTATION_COST, REPAIR_WORKSTATION_HITS)
+
 
 # ── Shop stub (abandoned, no background, anvil-sized) ────────────────────────
 
@@ -1264,6 +1277,10 @@ def _draw_shop_stub(painter: QPainter, state: GameState):
         )
     painter.setPen(Qt.NoPen)
 
+    # ── Repair overlay (material count or progress bar) ────────────────────
+    from config import REPAIR_SHOP_COST, REPAIR_SHOP_HITS
+    _draw_repair_overlay(painter, state, REPAIR_SHOP_COST, REPAIR_SHOP_HITS)
+
 
 # ── Workstation / shop full (unlocked, repaired — future use) ─────────────────
 
@@ -1318,6 +1335,79 @@ def _draw_shop_full(painter: QPainter, state: GameState):
     for rx, ry, rw, rh in [(215,195,370,10),(215,355,370,10),(215,195,10,170),
                             (575,195,10,170),(395,195,10,170),(215,270,370,8)]:
         painter.drawRect(QRectF(rx, ry, rw, rh))
+
+
+# ── Repair UI overlay ─────────────────────────────────────────────────────────
+
+def _draw_repair_overlay(painter: QPainter, state: GameState,
+                          cost: int, hits: int):
+    """Draw repair status in the centre of a stub object.
+    • Not in repair mode → shows material fraction (e.g. '2 / 10') + hint text.
+    • In repair mode (for this widget) → shows progress counter + filled bar.
+    Overlay is always visible on the stub so the player knows their progress
+    without having to hover."""
+    cx = float(GAME_W / 2)
+    is_my_repair = (state.repair_active
+                    and state.repair_widget_idx == state.widget_idx)
+
+    if is_my_repair:
+        # ── Repair-in-progress ─────────────────────────────────────────────
+        prog = state.repair_progress / max(1, state.repair_target)
+
+        # Counter text  "修復中  X / Y"
+        text = f"修復中  {state.repair_progress} / {state.repair_target}"
+        painter.setFont(_FONT_REPAIR)
+        fm = painter.fontMetrics()
+        tx = cx - fm.horizontalAdvance(text) / 2
+        ty = 380.0
+        painter.setPen(QPen(QColor(0, 0, 0, 150)))
+        for ox, oy in _SHADOW_OFS:
+            painter.drawText(QPointF(tx + ox, ty + oy), text)
+        painter.setPen(QPen(QColor(200, 160, 80, 240)))
+        painter.drawText(QPointF(tx, ty), text)
+
+        # Progress bar
+        bw, bh = 200.0, 10.0
+        bx = cx - bw / 2
+        by = 386.0
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(10, 8, 5, 210)))
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 3, 3)
+        if prog > 0:
+            painter.setBrush(QBrush(QColor(180, 140, 60, 235)))
+            painter.drawRoundedRect(QRectF(bx, by, bw * prog, bh), 3, 3)
+        bar_pen = QPen(QColor(70, 55, 30, 180))
+        bar_pen.setWidthF(1.0)
+        painter.setPen(bar_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 3, 3)
+        painter.setPen(Qt.NoPen)
+
+    else:
+        # ── Material check ─────────────────────────────────────────────────
+        has_mats = state.materials >= cost
+        mat_text = f"{state.materials} / {cost}"
+
+        painter.setFont(_FONT_REPAIR)
+        fm = painter.fontMetrics()
+        tx = cx - fm.horizontalAdvance(mat_text) / 2
+        ty = 380.0
+        mat_col = QColor(200, 160, 80, 240) if has_mats else QColor(140, 105, 55, 210)
+        painter.setPen(QPen(QColor(0, 0, 0, 150)))
+        for ox, oy in _SHADOW_OFS:
+            painter.drawText(QPointF(tx + ox, ty + oy), mat_text)
+        painter.setPen(QPen(mat_col))
+        painter.drawText(QPointF(tx, ty), mat_text)
+
+        # Hint text below fraction
+        hint = "點擊開始修復" if has_mats else "鐵錠不足"
+        painter.setFont(_FONT_REPAIR_HINT)
+        fm2 = painter.fontMetrics()
+        tx2 = cx - fm2.horizontalAdvance(hint) / 2
+        ty2 = 398.0
+        hint_col = QColor(200, 160, 80, 180) if has_mats else QColor(92, 92, 95, 160)
+        painter.setPen(QPen(hint_col))
+        painter.drawText(QPointF(tx2, ty2), hint)
 
 
 # ── Shared stub label helper ──────────────────────────────────────────────────
