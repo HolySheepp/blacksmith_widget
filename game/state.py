@@ -210,6 +210,9 @@ class GameState:
         # ── Ambient ember particles (transient — not saved) ────────────────
         self.embers: list = []
         self._ember_accum: float = 0.0
+        # input_heat: rises on every key/click (including charge keypresses),
+        # gives embers in modes where hits are infrequent (charge / turbo).
+        self.input_heat: float = 0.0
 
         # ── Critical hit system ────────────────────────────────────────────
         self.crit_rate: float = float(_sv.get("crit_rate", 0.05))   # 0.0–1.0
@@ -249,6 +252,8 @@ class GameState:
                 self.on_repair_input()
             return
         self.click_count += 1
+        # Every input raises input_heat — catches charge keypresses between hits
+        self.input_heat = min(1.0, self.input_heat + 0.15)
         if self.kb_mode == "combo":
             self._handle_combo_key()
         elif self.kb_mode == "charge_legacy":
@@ -274,6 +279,8 @@ class GameState:
             self.anvil_glow = max(0.0, self.anvil_glow - dt * _glow_decay)
         if self.heat_level > 0:
             self.heat_level = max(0.0, self.heat_level - dt * 0.20)
+        if self.input_heat > 0:
+            self.input_heat = max(0.0, self.input_heat - dt * 0.20)
 
         # Hit number popups: advance age and drift upward
         if self.hit_numbers:
@@ -383,9 +390,11 @@ class GameState:
         self.sparks = alive
 
         # ── Ambient embers — float up from the hot anvil face ─────────────
-        if self.widget_idx == 0 and self.heat_level > 0.05:
-            # spawn rate: ~3 embers/sec at max heat, tapers off as forge cools
-            self._ember_accum += dt * self.heat_level * 3.0
+        # Base rate 0.35/s always (forge is lit), plus bonus from recent activity.
+        # input_heat covers charge/turbo keypresses between actual hammer hits.
+        if self.widget_idx == 0:
+            _activity = max(self.heat_level, self.input_heat)
+            self._ember_accum += dt * (0.35 + _activity * 2.8)
             while self._ember_accum >= 1.0:
                 self._ember_accum -= 1.0
                 self._spawn_ember()
@@ -580,6 +589,7 @@ class GameState:
         self.repair_widget_idx    = 0
         self.embers               = []
         self._ember_accum         = 0.0
+        self.input_heat           = 0.0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
