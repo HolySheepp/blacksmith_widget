@@ -1128,10 +1128,6 @@ def _draw_workstation_stub(painter: QPainter, state: GameState):
     """廢棄工作站：透明背景，與鐵砧差不多大的破舊工作台。"""
     painter.setPen(Qt.NoPen)
 
-    # ── Drop shadow (matches anvil style) ─────────────────────────────────
-    painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
-    painter.drawEllipse(QPointF(AX, AY_BASE + 6), 132, 8)
-
     # ── Table top (slightly warped — left end droops) ──────────────────────
     # dark weathered wood, same x-range as anvil face ±15
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
@@ -1207,10 +1203,6 @@ def _draw_shop_stub(painter: QPainter, state: GameState):
     """廢棄店面：透明背景，與鐵砧差不多大的破舊攤位。"""
     painter.setPen(Qt.NoPen)
 
-    # ── Drop shadow ────────────────────────────────────────────────────────
-    painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
-    painter.drawEllipse(QPointF(AX, AY_BASE + 6), 132, 8)
-
     # ── Counter front panel (solid, tall) ──────────────────────────────────
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
     painter.drawRect(QRectF(253, 368, 276, 120))   # front face
@@ -1278,10 +1270,6 @@ def _draw_shop_stub(painter: QPainter, state: GameState):
 def _draw_workstation_full(painter: QPainter, state: GameState):
     """修好的工作站（透明背景，緊湊尺寸，供未來解鎖後使用）。"""
     painter.setPen(Qt.NoPen)
-
-    # Drop shadow
-    painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
-    painter.drawEllipse(QPointF(AX, AY_BASE + 6), 132, 8)
 
     # Table top — clean, flat, well-made
     painter.setBrush(QBrush(_CSTUB_WOOD_L))

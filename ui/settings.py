@@ -12,8 +12,8 @@ Settings:
 """
 import sys
 import os
-import ctypes
 import hashlib as _hlib
+import subprocess
 import winreg
 
 from PyQt5.QtWidgets import (
@@ -28,8 +28,9 @@ from PyQt5.QtCore import Qt, QTimer
 # The bytes [0x35,0x32,0x31,0x31] are the ASCII codes of the passphrase chars.
 _DT_GATE = _hlib.sha256(bytes([0x35, 0x32, 0x31, 0x31])).hexdigest()
 
-_REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_REG_NAME = "BlacksmithWidget"
+_REG_KEY   = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_REG_NAME  = "BlacksmithWidget"
+_TASK_NAME = "BlacksmithWidget"   # Task Scheduler task name
 
 
 def _exe_path() -> str:
@@ -40,7 +41,7 @@ def _exe_path() -> str:
 
 
 def _startup_lnk_path() -> str:
-    """Return full path of the Startup-folder shortcut."""
+    """Return full path of the legacy Startup-folder shortcut (for cleanup only)."""
     startup = os.path.join(
         os.environ.get("APPDATA", ""),
         r"Microsoft\Windows\Start Menu\Programs\Startup",
@@ -49,112 +50,68 @@ def _startup_lnk_path() -> str:
 
 
 def _autostart_get() -> bool:
-    """Return True if the Startup-folder shortcut exists."""
-    return os.path.exists(_startup_lnk_path())
-
-
-def _create_lnk(target_exe: str, lnk_path: str) -> None:
-    """Create a Windows .lnk shortcut via COM IShellLink (pure ctypes).
-    No subprocess, no external deps — ole32.dll is always present on Windows."""
-
-    class _GUID(ctypes.Structure):
-        _fields_ = [
-            ("Data1", ctypes.c_ulong),
-            ("Data2", ctypes.c_ushort),
-            ("Data3", ctypes.c_ushort),
-            ("Data4", ctypes.c_ubyte * 8),
-        ]
-
-    def _guid(d1, d2, d3, *d4):
-        g = _GUID()
-        g.Data1, g.Data2, g.Data3 = d1, d2, d3
-        g.Data4 = (ctypes.c_ubyte * 8)(*d4)
-        return g
-
-    def _vf(ptr, idx, rtype, *atypes):
-        """Call vtable method at index idx on a COM interface pointer."""
-        vt = ctypes.cast(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_void_p))[0],
-                         ctypes.POINTER(ctypes.c_void_p))
-        return ctypes.WINFUNCTYPE(rtype, ctypes.c_void_p, *atypes)(vt[idx])
-
-    # CLSID_ShellLink  {00021401-0000-0000-C000-000000000046}
-    # IID_IShellLinkW  {000214F9-0000-0000-C000-000000000046}
-    # IID_IPersistFile {0000010B-0000-0000-C000-000000000046}
-    CLSID_ShellLink  = _guid(0x00021401, 0, 0, 0xC0,0,0,0,0,0,0,0x46)
-    IID_IShellLinkW  = _guid(0x000214F9, 0, 0, 0xC0,0,0,0,0,0,0,0x46)
-    IID_IPersistFile = _guid(0x0000010B, 0, 0, 0xC0,0,0,0,0,0,0,0x46)
-
-    ole32 = ctypes.WinDLL("ole32")
-
-    # S_OK(0)=we initialised COM, S_FALSE(1)=already initialised same model — both mean we
-    # own a reference and MUST call CoUninitialize.
-    # Negative (e.g. RPC_E_CHANGED_MODE=0x80010106): already initialised with a different
-    # apartment model — we did NOT add a reference, so we must NOT call CoUninitialize.
-    coinit_hr  = ole32.CoInitialize(None)
-    need_uninit = coinit_hr in (0, 1)
-
-    psl = ctypes.c_void_p(None)
+    """Return True if the autostart scheduled task exists."""
     try:
-        hr = ole32.CoCreateInstance(
-            ctypes.byref(CLSID_ShellLink), None, 1,   # 1 = CLSCTX_INPROC_SERVER
-            ctypes.byref(IID_IShellLinkW), ctypes.byref(psl),
+        r = subprocess.run(
+            ["schtasks", "/query", "/tn", _TASK_NAME, "/fo", "list"],
+            capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        if hr != 0:
-            return
-
-        try:
-            # IShellLinkW vtable (after 3 IUnknown slots):
-            #   3=GetPath, 8=GetWorkingDirectory, 9=SetWorkingDirectory,
-            #   19=Resolve, 20=SetPath
-            _vf(psl, 20, ctypes.c_long, ctypes.c_wchar_p)(psl, target_exe)
-            _vf(psl, 9,  ctypes.c_long, ctypes.c_wchar_p)(psl, os.path.dirname(target_exe))
-
-            # QI for IPersistFile
-            ppf = ctypes.c_void_p(None)
-            hr = _vf(psl, 0, ctypes.c_long,
-                     ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)
-                     )(psl, ctypes.byref(IID_IPersistFile), ctypes.byref(ppf))
-            if hr == 0 and ppf:
-                try:
-                    # IPersistFile vtable: [6]=Save
-                    _vf(ppf, 6, ctypes.c_long,
-                        ctypes.c_wchar_p, ctypes.c_int)(ppf, lnk_path, 1)
-                finally:
-                    try:
-                        _vf(ppf, 2, ctypes.c_ulong)(ppf)   # Release IPersistFile
-                    except Exception:
-                        pass
-        finally:
-            try:
-                _vf(psl, 2, ctypes.c_ulong)(psl)            # Release IShellLink
-            except Exception:
-                pass
-    finally:
-        if need_uninit:
-            ole32.CoUninitialize()
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 def _autostart_set(enable: bool) -> None:
-    """Create or remove the Startup-folder .lnk shortcut.
-    Uses COM IShellLink via ctypes — no subprocess, no admin rights,
-    no AV-suspicious behaviour."""
+    """Register or remove a 'run at logon' scheduled task.
+
+    Advantages over the old Startup-folder .lnk approach:
+      • Windows does not apply its startup-delay optimisation to scheduled tasks.
+      • The task fires immediately on logon, ahead of 'Startup Apps'.
+      • No .lnk COM juggling required.
+
+    Also removes any legacy .lnk from the previous implementation on every call.
+    """
+    # Always clean up the old Startup-folder shortcut if it still exists
     lnk = _startup_lnk_path()
+    if os.path.exists(lnk):
+        try:
+            os.remove(lnk)
+        except Exception:
+            pass
+
     if enable:
         try:
-            _create_lnk(_exe_path(), lnk)
+            exe = _exe_path()
+            subprocess.run(
+                [
+                    "schtasks", "/create", "/f",
+                    "/tn", _TASK_NAME,
+                    "/tr", f'"{exe}"',   # quoted so paths with spaces work
+                    "/sc", "onlogon",
+                    "/it",              # interactive — runs in user's desktop session
+                    "/rl", "limited",   # standard user rights, no UAC prompt
+                ],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
         except Exception:
             pass
     else:
         try:
-            if os.path.exists(lnk):
-                os.remove(lnk)
+            subprocess.run(
+                ["schtasks", "/delete", "/f", "/tn", _TASK_NAME],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
         except Exception:
             pass
 
 
 def _autostart_migrate() -> None:
-    """One-time migration: remove legacy registry Run key if it still exists.
-    Called once at startup; after removal this function is a no-op forever."""
+    """One-time migration: remove legacy registry Run key and Startup-folder .lnk.
+    Called once at startup; silently no-ops if nothing to clean up."""
+    # Remove legacy registry key (used before v0.3.x)
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY,
                             access=winreg.KEY_SET_VALUE) as k:
@@ -163,6 +120,13 @@ def _autostart_migrate() -> None:
         pass
     except Exception:
         pass
+    # Remove legacy .lnk shortcut (used in v0.3.x, replaced by Task Scheduler)
+    lnk = _startup_lnk_path()
+    if os.path.exists(lnk):
+        try:
+            os.remove(lnk)
+        except Exception:
+            pass
 
 _DEF_SCALE = 0.6
 
