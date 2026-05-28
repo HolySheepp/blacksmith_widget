@@ -1320,21 +1320,45 @@ def _draw_workstation_full(painter: QPainter, state: GameState):
 
 
 def _draw_shop_full(painter: QPainter, state: GameState):
-    """修好的店面（保留供未來使用）。"""
+    """修好的店面（透明背景，緊湊尺寸，與鐵砧差不多大）。"""
     painter.setPen(Qt.NoPen)
-    painter.setBrush(QBrush(_CSTUB_BG))
-    painter.drawRect(QRectF(0, 0, GAME_W, GAME_H))
-    painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    painter.drawRect(QRectF(160, 370, 480, 38))
-    painter.drawRect(QRectF(160, 408, 480, 90))
+
+    # Counter top — clean, polished
     painter.setBrush(QBrush(_CSTUB_WOOD_L))
-    painter.drawRect(QRectF(160, 370, 480, 6))
-    painter.setBrush(QBrush(QColor(38, 32, 24, 200)))
-    painter.drawRect(QRectF(220, 200, 360, 155))
+    painter.drawRect(QRectF(252, 338, 278, 32))    # main surface
+    painter.setBrush(QBrush(QColor(78, 54, 22, 130)))
+    painter.drawRect(QRectF(252, 338, 278, 5))     # top edge highlight
+    # Wood grain
+    grain_pen = QPen(QColor(35, 20, 6, 55))
+    grain_pen.setWidthF(0.8)
+    painter.setPen(grain_pen)
+    for i in range(4):
+        ox = 275 + i * 58
+        painter.drawLine(QPointF(ox, 340), QPointF(ox + 3, 368))
+    painter.setPen(Qt.NoPen)
+
+    # Counter front — clean with vertical dividers
     painter.setBrush(QBrush(_CSTUB_WOOD_D))
-    for rx, ry, rw, rh in [(215,195,370,10),(215,355,370,10),(215,195,10,170),
-                            (575,195,10,170),(395,195,10,170),(215,270,370,8)]:
-        painter.drawRect(QRectF(rx, ry, rw, rh))
+    painter.drawRect(QRectF(252, 370, 278, 118))   # front face (bottom at 488)
+    # Horizontal trim strip at top of panel
+    painter.setBrush(QBrush(QColor(58, 40, 16, 200)))
+    painter.drawRect(QRectF(252, 370, 278, 7))
+    # Vertical dividers
+    div_pen = QPen(QColor(30, 18, 6, 110))
+    div_pen.setWidthF(1.5)
+    painter.setPen(div_pen)
+    for x in (322, 390, 460):
+        painter.drawLine(QPointF(x, 377), QPointF(x, 488))
+    painter.setPen(Qt.NoPen)
+
+    # Items displayed on counter top (for sale)
+    painter.setBrush(QBrush(QColor(75, 62, 40, 210)))
+    painter.drawRect(QRectF(268, 326, 38, 12))    # short sword
+    painter.drawRect(QRectF(314, 323, 7, 15))     # dagger
+    painter.setBrush(QBrush(QColor(88, 74, 50, 185)))
+    painter.drawRect(QRectF(440, 325, 60, 8))     # long blade
+    painter.setBrush(QBrush(QColor(65, 52, 34, 165)))
+    painter.drawRect(QRectF(362, 329, 50, 6))     # tool
 
 
 # ── Repair UI overlay ─────────────────────────────────────────────────────────
