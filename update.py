@@ -43,10 +43,12 @@ def fetch_latest(timeout: int = 6) -> dict | None:
         req = urllib.request.Request(_API_URL, headers=_HEADERS)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        tag = data.get("tag_name", "")
+        tag   = data.get("tag_name", "")
+        notes = data.get("body", "")       # release notes (Markdown)
         for asset in data.get("assets", []):
             if asset.get("name") == _ASSET_NAME:
-                return {"tag": tag, "url": asset["browser_download_url"]}
+                return {"tag": tag, "url": asset["browser_download_url"],
+                        "notes": notes}
     except Exception:
         pass
     return None
