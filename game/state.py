@@ -122,6 +122,13 @@ class GameState:
         # Heat accumulation (transient): increases on hit, decays slowly
         self.heat_level: float = 0.0
 
+        # ── Ambient ember particles (transient — not saved) ────────────────
+        self.embers: list = []
+        self._ember_accum: float = 0.0
+        # input_heat: rises on every key/click (including charge keypresses),
+        # gives embers in modes where hits are infrequent (charge / turbo).
+        self.input_heat: float = 0.0
+
         # Widget position (logical pixels).  None = let Qt decide on first launch.
         _wx = _sv.get("widget_x")
         _wy = _sv.get("widget_y")
@@ -224,6 +231,8 @@ class GameState:
         Always increments click_count.
         """
         self.click_count += 1
+        # Every input raises input_heat — catches charge keypresses between hits
+        self.input_heat = min(1.0, self.input_heat + 0.15)
         if self.kb_mode == "combo":
             self._handle_combo_key()
         elif self.kb_mode == "charge_legacy":
@@ -249,6 +258,25 @@ class GameState:
             self.anvil_glow = max(0.0, self.anvil_glow - dt * _glow_decay)
         if self.heat_level > 0:
             self.heat_level = max(0.0, self.heat_level - dt * 0.20)
+        if self.input_heat > 0:
+            self.input_heat = max(0.0, self.input_heat - dt * 0.20)
+
+        # ── Ambient embers — float up from the hot anvil face ─────────────
+        # Base rate 0.35/s always (forge is lit), plus bonus from recent activity.
+        # input_heat covers charge/turbo keypresses between actual hammer hits.
+        _activity = max(self.heat_level, self.input_heat)
+        self._ember_accum += dt * (0.35 + _activity * 2.8)
+        while self._ember_accum >= 1.0:
+            self._ember_accum -= 1.0
+            self._spawn_ember()
+        alive_e = []
+        for e in self.embers:
+            e.x    += e.vx * dt
+            e.y    += e.vy * dt
+            e.life -= dt
+            if e.life > 0:
+                alive_e.append(e)
+        self.embers = alive_e
 
         # Hit number popups: advance age and drift upward
         if self.hit_numbers:
@@ -469,6 +497,9 @@ class GameState:
         self.show_metal_forge   = True
         self.hit_numbers        = []
         self.heat_level         = 0.0
+        self.embers             = []
+        self._ember_accum       = 0.0
+        self.input_heat         = 0.0
         self.hide_anvil         = False
         self.lock_position      = False
         self.anvil_v2           = True
@@ -783,3 +814,17 @@ class GameState:
             vx   = math.cos(a) * spd
             vy   = math.sin(a) * spd - 70
             self.sparks.append(Spark(sx, sy, vx, vy, life, size, color))
+
+    def _spawn_ember(self):
+        """Spawn one slow-rising ambient ember from the hot anvil face."""
+        x  = FACE_L + random.random() * (FACE_R - FACE_L)
+        y  = FACE_TOP - random.random() * 8
+        vx = (random.random() - 0.5) * 20
+        vy = -(20 + random.random() * 55)
+        life = 2.0 + random.random() * 2.5
+        size = 1.2 + random.random() * 2.2
+        t = self.heat_level
+        r = int(140 + t * 115)
+        g = int(  8 + t *  82)
+        b = 0
+        self.embers.append(Spark(x, y, vx, vy, life, size, (r, g, b)))

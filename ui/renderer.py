@@ -254,6 +254,7 @@ def draw_frame(painter: QPainter, state: GameState):
         _draw_metal(painter, state)
         _draw_anvil_mode_indicator(painter, state)
     _draw_sparks(painter, state)
+    _draw_embers(painter, state)
     _draw_hammer(painter, state, cos_a, sin_a)
     if not state.hide_anvil:
         _draw_flash(painter, state)
@@ -613,6 +614,30 @@ def _draw_sparks(painter: QPainter, state: GameState):
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(QColor(r, g, b, int(al * 255))))
         painter.drawRect(QRectF(s.x - sz * 0.5, s.y - sz * 0.5, sz, sz))
+
+
+def _draw_embers(painter: QPainter, state: GameState):
+    """Ambient rising embers — slow, semi-transparent, fading in/out."""
+    embers = getattr(state, 'embers', None)
+    if not embers:
+        return
+    painter.setPen(Qt.NoPen)
+    for e in embers:
+        frac = e.frac                         # 1.0 → 0.0 over lifetime
+        # Fade in for first 15%, hold, fade out for last 45%
+        if frac > 0.85:
+            alpha_f = (1.0 - frac) / 0.15
+        elif frac < 0.45:
+            alpha_f = frac / 0.45
+        else:
+            alpha_f = 1.0
+        alpha = int(alpha_f * 145)            # max 145/255 — always soft
+        if alpha < 4:
+            continue
+        r, g, b = e.color
+        sz = e.size
+        painter.setBrush(QBrush(QColor(r, g, b, alpha)))
+        painter.drawEllipse(QPointF(e.x, e.y), sz, sz)
 
 
 # ── Strike flash ──────────────────────────────────────────────────────────────
