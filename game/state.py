@@ -160,7 +160,7 @@ class GameState:
         self.art_mode:           bool  = bool(_sv.get("art_mode",           False))
         self.art_drag_px:        int   = int(_sv.get("art_drag_px",         20))
         self.art_drag_max_cps:   float = float(_sv.get("art_drag_max_cps",  12.0))
-        self.art_scroll_max_cps: float = float(_sv.get("art_scroll_max_cps", 8.0))
+        self.art_scroll_max_cps: float = float(_sv.get("art_scroll_max_cps", 16.0))
         # Transient dev override — always saved so the dev doesn't need to re-enable
         self.art_always_on:      bool  = bool(_sv.get("art_always_on",      False))
         # Idle timers: normal and art-mode relaxed version (ms)
@@ -530,7 +530,7 @@ class GameState:
         self.art_mode           = False
         self.art_drag_px        = 20
         self.art_drag_max_cps   = 12.0
-        self.art_scroll_max_cps = 8.0
+        self.art_scroll_max_cps = 16.0
         self.art_always_on      = False
         self.charge_ex_idle_ms  = CHARGE_EX_IDLE_MS
         self.art_idle_ms        = 300.0

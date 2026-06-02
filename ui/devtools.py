@@ -28,7 +28,7 @@ _DEF_WINDOW_MS  = 520   # default charge window duration (ms)
 _DEF_IDLE_MS    = 200   # default idle timer (ms)
 _DEF_ART_IDLE   = 300   # default art-mode idle timer (ms)
 _DEF_DRAG_CPS   = 12    # default drag CPS
-_DEF_SCROLL_CPS = 8     # default scroll CPS
+_DEF_SCROLL_CPS = 16    # default scroll CPS
 
 
 class DevToolsDialog(QDialog):

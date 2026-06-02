@@ -25,8 +25,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 
 # Dev-tools gate — SHA-256 of the passphrase; plaintext NOT stored in source.
-# The bytes [0x35,0x32,0x31,0x31] are the ASCII codes of the passphrase chars.
-_DT_GATE = _hlib.sha256(bytes([0x35, 0x32, 0x31, 0x31])).hexdigest()
+# The bytes [0x30,0x33,0x32,0x32] are the ASCII codes of the passphrase chars.
+_DT_GATE = _hlib.sha256(bytes([0x30, 0x33, 0x32, 0x32])).hexdigest()
 
 _REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _REG_NAME = "BlacksmithWidget"
