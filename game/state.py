@@ -157,11 +157,20 @@ class GameState:
         self.always_on_top:   bool = bool(_sv.get("always_on_top",   True))
 
         # ── Art mode (美術模式) ────────────────────────────────────────────
-        self.art_mode:         bool  = bool(_sv.get("art_mode",         False))
-        self.art_drag_px:      int   = int(_sv.get("art_drag_px",       25))
-        self.art_drag_max_cps: float = float(_sv.get("art_drag_max_cps", 8.0))
+        self.art_mode:           bool  = bool(_sv.get("art_mode",           False))
+        self.art_drag_px:        int   = int(_sv.get("art_drag_px",         20))
+        self.art_drag_max_cps:   float = float(_sv.get("art_drag_max_cps",  12.0))
+        self.art_scroll_max_cps: float = float(_sv.get("art_scroll_max_cps", 8.0))
         # Transient dev override — always saved so the dev doesn't need to re-enable
-        self.art_always_on:    bool  = bool(_sv.get("art_always_on",    False))
+        self.art_always_on:      bool  = bool(_sv.get("art_always_on",      False))
+        # Idle timers: normal and art-mode relaxed version (ms)
+        self.charge_ex_idle_ms:  float = float(_sv.get("charge_ex_idle_ms", CHARGE_EX_IDLE_MS))
+        self.art_idle_ms:        float = float(_sv.get("art_idle_ms",        300.0))
+        # Custom title keywords for art-window detection (user-defined, e.g. "簡報,傳單")
+        _cust = _sv.get("art_custom_titles", [])
+        self.art_custom_titles:  list  = [str(t) for t in _cust] if isinstance(_cust, list) else []
+        # Transient: True when the foreground window is a known design tool/site
+        self.art_window_active:  bool  = False
 
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
@@ -422,7 +431,11 @@ class GameState:
             "art_mode":                self.art_mode,
             "art_drag_px":             self.art_drag_px,
             "art_drag_max_cps":        self.art_drag_max_cps,
+            "art_scroll_max_cps":      self.art_scroll_max_cps,
             "art_always_on":           self.art_always_on,
+            "charge_ex_idle_ms":       self.charge_ex_idle_ms,
+            "art_idle_ms":             self.art_idle_ms,
+            "art_custom_titles":       list(self.art_custom_titles),
         }
 
     def _metal_to_save(self) -> dict | None:
@@ -514,10 +527,15 @@ class GameState:
         self.combo_dot_idx  = -1
         self.turbo_line_idx = -1
         # Art mode
-        self.art_mode         = False
-        self.art_drag_px      = 25
-        self.art_drag_max_cps = 8.0
-        self.art_always_on    = False
+        self.art_mode           = False
+        self.art_drag_px        = 20
+        self.art_drag_max_cps   = 12.0
+        self.art_scroll_max_cps = 8.0
+        self.art_always_on      = False
+        self.charge_ex_idle_ms  = CHARGE_EX_IDLE_MS
+        self.art_idle_ms        = 300.0
+        self.art_custom_titles  = []
+        self.art_window_active  = False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
@@ -539,6 +557,13 @@ class GameState:
             # Queue full — count force without queuing another strike
             self.force_count += 1
 
+    @property
+    def _effective_idle_ms(self) -> float:
+        """閒置計時器 ms — 美術模式且偵測到設計視窗時使用寬鬆值。"""
+        if self.art_mode and (self.art_always_on or self.art_window_active):
+            return self.art_idle_ms
+        return self.charge_ex_idle_ms
+
     def _handle_charge_key(self):
         """蓄力模式: clicks charge AND give an upward velocity kick.
         A fixed window timer starts on the first click; when it expires the
@@ -557,7 +582,7 @@ class GameState:
                 self.charge_ex_armed = True
                 self.charge_ex_timer = self.typing_base_ms   # hard-cap window
             # Reset inactivity timer on EVERY click — slam if player stops clicking
-            self.charge_ex_idle_timer = CHARGE_EX_IDLE_MS
+            self.charge_ex_idle_timer = self._effective_idle_ms
             # Charge and lift
             self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
             cf = self.typing_charge / max(1, self.typing_max_charge)
@@ -616,7 +641,7 @@ class GameState:
                             self.charge_prefire       = False
                             self.charge_ex_armed      = True
                             self.charge_ex_timer      = self.typing_base_ms
-                            self.charge_ex_idle_timer = CHARGE_EX_IDLE_MS
+                            self.charge_ex_idle_timer = self._effective_idle_ms
                             self.typing_charge        = 1
                             cf = 1.0 / max(1, self.typing_max_charge)
                             self.charge_pulses.append({"t": 0.0, "cf": cf})

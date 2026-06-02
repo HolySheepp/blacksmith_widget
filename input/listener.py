@@ -35,10 +35,11 @@ _ART_TITLE = ("figma", "canva")
 
 _art_cache_result: bool  = False
 _art_cache_time:   float = 0.0
+_art_cache_custom: tuple = ()
 _ART_CACHE_TTL             = 0.25   # seconds between re-checks
 
 
-def _detect_art_window() -> bool:
+def _detect_art_window(custom_kws: tuple = ()) -> bool:
     """Return True if the foreground window belongs to a design tool."""
     try:
         hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -46,12 +47,13 @@ def _detect_art_window() -> bool:
             return False
 
         # 1. Window title check — catches browser-based tools (Figma, Canva)
+        #    and user-defined custom keywords.
         length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
         if length > 0:
             buf = ctypes.create_unicode_buffer(length + 1)
             ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
             title_lower = buf.value.lower()
-            for kw in _ART_TITLE:
+            for kw in _ART_TITLE + custom_kws:
                 if kw in title_lower:
                     return True
 
@@ -80,14 +82,16 @@ def _detect_art_window() -> bool:
     return False
 
 
-def _is_art_window() -> bool:
-    """Cached version of _detect_art_window — re-checks at most every 250 ms."""
-    global _art_cache_result, _art_cache_time
+def _is_art_window(custom_kws: tuple = ()) -> bool:
+    """Cached version of _detect_art_window — re-checks at most every 250 ms.
+    Cache is also invalidated when custom_kws changes."""
+    global _art_cache_result, _art_cache_time, _art_cache_custom
     now = time.monotonic()
-    if now - _art_cache_time < _ART_CACHE_TTL:
+    if custom_kws == _art_cache_custom and now - _art_cache_time < _ART_CACHE_TTL:
         return _art_cache_result
     _art_cache_time   = now
-    _art_cache_result = _detect_art_window()
+    _art_cache_custom = custom_kws
+    _art_cache_result = _detect_art_window(custom_kws)
     return _art_cache_result
 
 
@@ -194,7 +198,10 @@ class InputListener(QObject):
             s = self._state
             if s is None or not s.art_mode:
                 return
-            if not s.art_always_on and not _is_art_window():
+            custom_kws = tuple(s.art_custom_titles)
+            in_art = s.art_always_on or _is_art_window(custom_kws)
+            s.art_window_active = in_art
+            if not in_art:
                 return
 
             self._art_accum += math.sqrt(dx * dx + dy * dy)
@@ -218,9 +225,12 @@ class InputListener(QObject):
             s = self._state
             if s is None or not s.art_mode:
                 return
-            if not s.art_always_on and not _is_art_window():
+            custom_kws = tuple(s.art_custom_titles)
+            in_art = s.art_always_on or _is_art_window(custom_kws)
+            s.art_window_active = in_art
+            if not in_art:
                 return
-            min_interval = 1.0 / max(0.1, s.art_drag_max_cps)
+            min_interval = 1.0 / max(0.1, s.art_scroll_max_cps)
             now = time.monotonic()
             if now - self._art_last_emit >= min_interval:
                 self._art_last_emit = now

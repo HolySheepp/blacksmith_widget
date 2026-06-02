@@ -25,6 +25,10 @@ _DEF_FEV_DUR    = 20
 _DEF_FEV_CD     = 75
 _DEF_EX_LIFT    = 500   # default charge-EX lift (game units / s)
 _DEF_WINDOW_MS  = 520   # default charge window duration (ms)
+_DEF_IDLE_MS    = 200   # default idle timer (ms)
+_DEF_ART_IDLE   = 300   # default art-mode idle timer (ms)
+_DEF_DRAG_CPS   = 12    # default drag CPS
+_DEF_SCROLL_CPS = 8     # default scroll CPS
 
 
 class DevToolsDialog(QDialog):
@@ -119,6 +123,13 @@ class DevToolsDialog(QDialog):
         window_row.addWidget(self.window_edit)
         cl.addLayout(window_row)
 
+        idle_row = QHBoxLayout()
+        idle_row.addWidget(QLabel(f"閒置計時器（ms，默認 {_DEF_IDLE_MS}）:"))
+        self.idle_ms_edit = QLineEdit()
+        self.idle_ms_edit.setToolTip("停止輸入超過此時間後自動下砸（毫秒）")
+        idle_row.addWidget(self.idle_ms_edit)
+        cl.addLayout(idle_row)
+
         apply_charge = QPushButton("套用蓄力設定")
         apply_charge.clicked.connect(self._apply_charge)
         cl.addWidget(apply_charge)
@@ -200,9 +211,7 @@ class DevToolsDialog(QDialog):
         self.art_drag_px_edit.setToolTip("每累積多少像素觸發一次虛擬點擊（默認 25）")
         art_form.addRow("拖曳閾值 (px，默認 25):", self.art_drag_px_edit)
 
-        # 速度上限 (CPS)
-        cps_row = QHBoxLayout()
-        cps_row.addWidget(QLabel())   # spacer for FormLayout label slot
+        # 拖曳速度上限 (CPS)
         self.art_cps_slider = QSlider(Qt.Horizontal)
         self.art_cps_slider.setRange(1, 20)
         self.art_cps_slider.setTickInterval(1)
@@ -211,10 +220,40 @@ class DevToolsDialog(QDialog):
         self.art_cps_lbl.setMinimumWidth(30)
         self.art_cps_slider.valueChanged.connect(
             lambda v: self.art_cps_lbl.setText(f"{v} cps"))
-        art_cps_row2 = QHBoxLayout()
-        art_cps_row2.addWidget(self.art_cps_slider)
-        art_cps_row2.addWidget(self.art_cps_lbl)
-        art_form.addRow("速度上限（默認 8 cps）:", art_cps_row2)
+        art_cps_row = QHBoxLayout()
+        art_cps_row.addWidget(self.art_cps_slider)
+        art_cps_row.addWidget(self.art_cps_lbl)
+        art_form.addRow(f"拖曳速度上限（默認 {_DEF_DRAG_CPS} cps）:", art_cps_row)
+
+        # 滾輪速度上限 (CPS) — independent from drag CPS
+        self.art_scroll_cps_slider = QSlider(Qt.Horizontal)
+        self.art_scroll_cps_slider.setRange(1, 20)
+        self.art_scroll_cps_slider.setTickInterval(1)
+        self.art_scroll_cps_slider.setTickPosition(QSlider.TicksBelow)
+        self.art_scroll_cps_lbl = QLabel()
+        self.art_scroll_cps_lbl.setMinimumWidth(30)
+        self.art_scroll_cps_slider.valueChanged.connect(
+            lambda v: self.art_scroll_cps_lbl.setText(f"{v} cps"))
+        art_scroll_row = QHBoxLayout()
+        art_scroll_row.addWidget(self.art_scroll_cps_slider)
+        art_scroll_row.addWidget(self.art_scroll_cps_lbl)
+        art_form.addRow(f"滾輪速度上限（默認 {_DEF_SCROLL_CPS} cps）:", art_scroll_row)
+
+        # 美術模式閒置計時器
+        self.art_idle_ms_edit = QLineEdit()
+        self.art_idle_ms_edit.setToolTip(
+            f"在美術模式下（偵測到設計視窗時），閒置計時器延長至此值（毫秒）。\n"
+            f"默認 {_DEF_ART_IDLE} ms，比一般模式的 {_DEF_IDLE_MS} ms 更寬鬆。"
+        )
+        art_form.addRow(f"美術模式閒置（ms，默認 {_DEF_ART_IDLE}）:", self.art_idle_ms_edit)
+
+        # 自訂視窗標題關鍵字（用於 Canva 等頁面標題不含固定字樣的情況）
+        self.art_custom_titles_edit = QLineEdit()
+        self.art_custom_titles_edit.setToolTip(
+            "逗號分隔的視窗標題關鍵字，用於偵測設計相關視窗。\n"
+            "例如：簡報,傳單,海報（適用於 Canva 不顯示「Canva」字樣的頁面）"
+        )
+        art_form.addRow("自訂標題關鍵字:", self.art_custom_titles_edit)
 
         apply_art = QPushButton("套用美術模式設定")
         apply_art.clicked.connect(self._apply_art)
@@ -264,6 +303,7 @@ class DevToolsDialog(QDialog):
         self.lift_slider.blockSignals(False)
         self.lift_lbl.setText(str(lift_val * 10))
         self.window_edit.setText(str(int(s.typing_base_ms)))
+        self.idle_ms_edit.setText(str(int(s.charge_ex_idle_ms)))
         self.fever_thresh_slider.setValue(s.fever_threshold)
         self.fever_thresh_lbl.setText(str(s.fever_threshold))
         self.fever_dur_edit.setText(str(int(s.fever_duration)))
@@ -283,6 +323,13 @@ class DevToolsDialog(QDialog):
         self.art_cps_slider.setValue(cps_val)
         self.art_cps_slider.blockSignals(False)
         self.art_cps_lbl.setText(f"{cps_val} cps")
+        scroll_cps_val = max(1, min(20, round(s.art_scroll_max_cps)))
+        self.art_scroll_cps_slider.blockSignals(True)
+        self.art_scroll_cps_slider.setValue(scroll_cps_val)
+        self.art_scroll_cps_slider.blockSignals(False)
+        self.art_scroll_cps_lbl.setText(f"{scroll_cps_val} cps")
+        self.art_idle_ms_edit.setText(str(int(s.art_idle_ms)))
+        self.art_custom_titles_edit.setText(", ".join(s.art_custom_titles))
 
     # ── Individual apply actions ──────────────────────────────────────────────
 
@@ -300,6 +347,11 @@ class DevToolsDialog(QDialog):
         try:
             window = float(self.window_edit.text())
             self.state.typing_base_ms = max(50.0, min(5000.0, window))
+        except ValueError:
+            pass
+        try:
+            idle = float(self.idle_ms_edit.text())
+            self.state.charge_ex_idle_ms = max(50.0, min(5000.0, idle))
         except ValueError:
             pass
 
@@ -331,7 +383,15 @@ class DevToolsDialog(QDialog):
             self.state.art_drag_px = max(1, px)
         except ValueError:
             pass
-        self.state.art_drag_max_cps = float(self.art_cps_slider.value())
+        self.state.art_drag_max_cps   = float(self.art_cps_slider.value())
+        self.state.art_scroll_max_cps = float(self.art_scroll_cps_slider.value())
+        try:
+            art_idle = float(self.art_idle_ms_edit.text())
+            self.state.art_idle_ms = max(50.0, min(5000.0, art_idle))
+        except ValueError:
+            pass
+        raw = self.art_custom_titles_edit.text()
+        self.state.art_custom_titles = [t.strip().lower() for t in raw.split(",") if t.strip()]
 
     def _apply_all(self):
         self._apply_counters()
