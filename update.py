@@ -139,10 +139,7 @@ def launch_updater(new_exe: str, old_exe: str) -> None:
         # launches the moment the bat finishes, not after a polling delay.
         # /it = "interactive task": runs in the user's active desktop session.
         # \"...\" inside the outer "" quotes the exe path for schtasks /tr.
-        # Pass --just-updated so the new exe knows it was auto-installed and
-        # skips the 2-second startup update check (avoids an immediate "v0.4.x
-        # is available" popup right after the user just finished updating).
-        f'schtasks /create /f /tn "_BSW_Update" /tr "\\"{old_exe}\\" --just-updated" /sc once /st 00:00 /it >nul 2>&1\n'
+        f'schtasks /create /f /tn "_BSW_Update" /tr "\\"{old_exe}\\"" /sc once /st 00:00 /it >nul 2>&1\n'
         'schtasks /run /tn "_BSW_Update" >nul 2>&1\n'
         'del "%~f0"\n'
     )
