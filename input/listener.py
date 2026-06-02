@@ -242,8 +242,13 @@ class InputListener(QObject):
             pass
 
     def _on_mouse_scroll(self, x, y, dx, dy):
-        """Art-mode scroll handler: each scroll tick → rate-limited virtual click."""
+        """Art-mode scroll handler: each scroll tick → rate-limited virtual click.
+        Requires at least one key/button to be held — this filters out programmatic
+        scroll events fired by browsers when restoring page position on load/navigate."""
         try:
+            # Guard: no held input → definitely not a deliberate art-mode scroll
+            if not self._held:
+                return
             s = self._state
             if s is None or not s.art_mode:
                 return
