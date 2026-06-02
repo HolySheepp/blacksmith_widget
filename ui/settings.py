@@ -281,6 +281,20 @@ class SettingsDialog(QDialog):
         sep2.setFrameShadow(QFrame.Sunken)
         cl.addWidget(sep2)
 
+        # Art mode
+        art_row = QHBoxLayout()
+        art_row.addWidget(QLabel("我是美術 (實驗):"))
+        self.art_mode_cb = QCheckBox()
+        self.art_mode_cb.setToolTip(
+            "開啟後，在 PS / AI / AE / PR / Figma / Canva 等設計軟體中\n"
+            "按住並拖曳滑鼠將視作連續點擊，讓美術工作者也能參與鍛造"
+        )
+        self.art_mode_cb.toggled.connect(
+            lambda v: setattr(self.state, 'art_mode', v))
+        art_row.addWidget(self.art_mode_cb)
+        art_row.addStretch()
+        cl.addLayout(art_row)
+
         # Center widget
         if self._center_cb is not None:
             center_btn = QPushButton("📌  移回螢幕中央")
@@ -343,6 +357,10 @@ class SettingsDialog(QDialog):
         self.autostart_cb.blockSignals(True)
         self.autostart_cb.setChecked(self.state.autostart)
         self.autostart_cb.blockSignals(False)
+
+        self.art_mode_cb.blockSignals(True)
+        self.art_mode_cb.setChecked(self.state.art_mode)
+        self.art_mode_cb.blockSignals(False)
 
         self.always_on_top_cb.blockSignals(True)
         self.always_on_top_cb.setChecked(self.state.always_on_top)

@@ -156,6 +156,13 @@ class GameState:
         self.lock_position:   bool = bool(_sv.get("lock_position",   False))
         self.always_on_top:   bool = bool(_sv.get("always_on_top",   True))
 
+        # ── Art mode (美術模式) ────────────────────────────────────────────
+        self.art_mode:         bool  = bool(_sv.get("art_mode",         False))
+        self.art_drag_px:      int   = int(_sv.get("art_drag_px",       25))
+        self.art_drag_max_cps: float = float(_sv.get("art_drag_max_cps", 8.0))
+        # Transient dev override — always saved so the dev doesn't need to re-enable
+        self.art_always_on:    bool  = bool(_sv.get("art_always_on",    False))
+
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
 
@@ -412,6 +419,10 @@ class GameState:
             "current_metal_save":      self._metal_to_save(),
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,
+            "art_mode":                self.art_mode,
+            "art_drag_px":             self.art_drag_px,
+            "art_drag_max_cps":        self.art_drag_max_cps,
+            "art_always_on":           self.art_always_on,
         }
 
     def _metal_to_save(self) -> dict | None:
@@ -502,6 +513,11 @@ class GameState:
         self.last_crit      = False
         self.combo_dot_idx  = -1
         self.turbo_line_idx = -1
+        # Art mode
+        self.art_mode         = False
+        self.art_drag_px      = 25
+        self.art_drag_max_cps = 8.0
+        self.art_always_on    = False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal

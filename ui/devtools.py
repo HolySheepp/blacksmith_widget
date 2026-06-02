@@ -180,7 +180,50 @@ class DevToolsDialog(QDialog):
         crit_box.setLayout(crit_form)
         root.addWidget(crit_box)
 
-        # ── 5. Bottom buttons ─────────────────────────────────────────────────
+        # ── 5. 美術模式測試 ───────────────────────────────────────────────────
+        art_box  = QGroupBox("美術模式測試")
+        art_form = QFormLayout()
+        art_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        # 永遠開啟美術功能 — applies immediately (dev shortcut, no Apply needed)
+        self.art_always_on_cb = QCheckBox()
+        self.art_always_on_cb.setToolTip(
+            "開啟後，無論當前 focus 在哪個視窗，\n"
+            "拖曳滑鼠都會觸發虛擬點擊（方便開發者測試）"
+        )
+        self.art_always_on_cb.toggled.connect(
+            lambda v: setattr(self.state, 'art_always_on', v))
+        art_form.addRow("永遠開啟美術功能:", self.art_always_on_cb)
+
+        # 拖曳距離閾值
+        self.art_drag_px_edit = QLineEdit()
+        self.art_drag_px_edit.setToolTip("每累積多少像素觸發一次虛擬點擊（默認 25）")
+        art_form.addRow("拖曳閾值 (px，默認 25):", self.art_drag_px_edit)
+
+        # 速度上限 (CPS)
+        cps_row = QHBoxLayout()
+        cps_row.addWidget(QLabel())   # spacer for FormLayout label slot
+        self.art_cps_slider = QSlider(Qt.Horizontal)
+        self.art_cps_slider.setRange(1, 20)
+        self.art_cps_slider.setTickInterval(1)
+        self.art_cps_slider.setTickPosition(QSlider.TicksBelow)
+        self.art_cps_lbl = QLabel()
+        self.art_cps_lbl.setMinimumWidth(30)
+        self.art_cps_slider.valueChanged.connect(
+            lambda v: self.art_cps_lbl.setText(f"{v} cps"))
+        art_cps_row2 = QHBoxLayout()
+        art_cps_row2.addWidget(self.art_cps_slider)
+        art_cps_row2.addWidget(self.art_cps_lbl)
+        art_form.addRow("速度上限（默認 8 cps）:", art_cps_row2)
+
+        apply_art = QPushButton("套用美術模式設定")
+        apply_art.clicked.connect(self._apply_art)
+        art_form.addRow(apply_art)
+
+        art_box.setLayout(art_form)
+        root.addWidget(art_box)
+
+        # ── 6. Bottom buttons ─────────────────────────────────────────────────
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setFrameShadow(QFrame.Sunken)
@@ -230,6 +273,17 @@ class DevToolsDialog(QDialog):
         self.crit_rate_edit.setText(f"{s.crit_rate * 100:.1f}")
         self.crit_mult_edit.setText(f"{s.crit_mult:.1f}")
 
+        # Art mode
+        self.art_always_on_cb.blockSignals(True)
+        self.art_always_on_cb.setChecked(s.art_always_on)
+        self.art_always_on_cb.blockSignals(False)
+        self.art_drag_px_edit.setText(str(s.art_drag_px))
+        cps_val = max(1, min(20, round(s.art_drag_max_cps)))
+        self.art_cps_slider.blockSignals(True)
+        self.art_cps_slider.setValue(cps_val)
+        self.art_cps_slider.blockSignals(False)
+        self.art_cps_lbl.setText(f"{cps_val} cps")
+
     # ── Individual apply actions ──────────────────────────────────────────────
 
     def _apply_counters(self):
@@ -271,11 +325,20 @@ class DevToolsDialog(QDialog):
         except ValueError:
             pass
 
+    def _apply_art(self):
+        try:
+            px = int(self.art_drag_px_edit.text())
+            self.state.art_drag_px = max(1, px)
+        except ValueError:
+            pass
+        self.state.art_drag_max_cps = float(self.art_cps_slider.value())
+
     def _apply_all(self):
         self._apply_counters()
         self._apply_charge()
         self._apply_fever_settings()
         self._apply_crit()
+        self._apply_art()
 
     def _apply_all_and_close(self):
         self._apply_all()

@@ -83,6 +83,7 @@ class BlacksmithWidget(QWidget):
 
         _wlog("[init] KeyboardListener()")
         self.listener = KeyboardListener()
+        self.listener.set_state(self.state)   # art-mode drag detection needs state
         self.listener.key_pressed.connect(self._on_key)
         # Root cause of "process exists but no window" on --onefile builds:
         #   PyInstaller --onefile runs Python in a child process.  On Windows,
