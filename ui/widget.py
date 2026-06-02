@@ -241,9 +241,15 @@ class BlacksmithWidget(QWidget):
         _wlog("[timers] listener thread dispatched")
         # Frozen-exe only: schedule an update check 2 s after startup, plus
         # a periodic hourly check.
+        # Skip the startup check if launched with --just-updated (i.e. we are
+        # the freshly-installed exe that replaced itself).  The hourly timer
+        # still runs so the user won't miss a future release.
         if getattr(sys, "frozen", False):
-            QTimer.singleShot(2000, lambda: self._start_update_check(True))
-            _wlog("[timers] update check scheduled (2 s)")
+            if "--just-updated" not in sys.argv:
+                QTimer.singleShot(2000, lambda: self._start_update_check(True))
+                _wlog("[timers] update check scheduled (2 s)")
+            else:
+                _wlog("[timers] just-updated flag detected — skipping startup check")
             if hasattr(self, "_update_timer"):
                 self._update_timer.start()
                 _wlog("[timers] _update_timer started")
