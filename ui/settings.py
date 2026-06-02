@@ -260,28 +260,21 @@ class SettingsDialog(QDialog):
 
         # Mode selection (applies immediately)
         cl.addWidget(QLabel("遊戲模式:"))
-        self.charge_radio    = QRadioButton("✪ 蓄力模式")
-        self.combo_radio     = QRadioButton("❉ 連打模式")
-        self.charge_ex_radio = QRadioButton("◇ 蓄力模式 (舊版)")
-        self.turbo_radio     = QRadioButton("⚡ 渦輪模式 (實驗)")
+        self.charge_radio = QRadioButton("✪ 蓄力模式")
+        self.combo_radio  = QRadioButton("❉ 連打模式")
+        self.turbo_radio  = QRadioButton("⚡ 渦輪模式 (實驗)")
         self.mode_group = QButtonGroup(self)
-        self.mode_group.addButton(self.charge_radio,    0)
-        self.mode_group.addButton(self.combo_radio,     1)
-        self.mode_group.addButton(self.charge_ex_radio, 2)
-        self.mode_group.addButton(self.turbo_radio,     3)
+        self.mode_group.addButton(self.charge_radio, 0)
+        self.mode_group.addButton(self.combo_radio,  1)
+        self.mode_group.addButton(self.turbo_radio,  2)
         self.mode_group.buttonClicked.connect(self._on_mode_changed)
 
         mode_row1 = QHBoxLayout()
         mode_row1.addWidget(self.charge_radio)
         mode_row1.addWidget(self.combo_radio)
+        mode_row1.addWidget(self.turbo_radio)
         mode_row1.addStretch()
         cl.addLayout(mode_row1)
-
-        mode_row2 = QHBoxLayout()
-        mode_row2.addWidget(self.charge_ex_radio)
-        mode_row2.addWidget(self.turbo_radio)
-        mode_row2.addStretch()
-        cl.addLayout(mode_row2)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
@@ -308,45 +301,22 @@ class SettingsDialog(QDialog):
         vl  = QVBoxLayout()
         vl.setSpacing(6)
 
-        self.fx_hit_numbers_cb  = QCheckBox("打擊數字跳出")
-        self.fx_heat_accum_cb   = QCheckBox("累積餘熱效果")
-        self.fx_anvil_v2_cb     = QCheckBox("新式鐵砧外觀")
-        self.fx_pulse_cb        = QCheckBox("打擊脈衝效果")
-        self.fx_metal_forge_cb  = QCheckBox("金屬鍛造")
+        self.fx_hit_numbers_cb = QCheckBox("打擊數字跳出")
+        self.fx_metal_forge_cb = QCheckBox("金屬鍛造")
 
         self.fx_hit_numbers_cb.setToolTip("打擊時在鐵砧上方顯示浮動數字")
-        self.fx_heat_accum_cb.setToolTip("連續打擊會使鐵砧維持熾熱狀態較久")
-        self.fx_anvil_v2_cb.setToolTip("使用簡潔的圖標風格鐵砧（關閉則恢復經典樣式）")
-        self.fx_pulse_cb.setToolTip("關閉後隱藏打擊時在鐵砧面或金屬塊上閃爍的框框")
         self.fx_metal_forge_cb.setToolTip("關閉後鐵砧上不會出現金屬塊，純粹打擊；已鍛造計數仍保留")
 
         self.fx_hit_numbers_cb.toggled.connect(
             lambda v: setattr(self.state, 'show_hit_numbers', v))
-        self.fx_heat_accum_cb.toggled.connect(
-            lambda v: setattr(self.state, 'show_heat_accum', v))
-        self.fx_anvil_v2_cb.toggled.connect(
-            lambda v: setattr(self.state, 'anvil_v2', v))
-        self.fx_pulse_cb.toggled.connect(
-            lambda v: setattr(self.state, 'show_strike_pulse', v))
         self.fx_metal_forge_cb.toggled.connect(
             lambda v: setattr(self.state, 'show_metal_forge', v))
 
         row_fx1 = QHBoxLayout()
         row_fx1.addWidget(self.fx_hit_numbers_cb)
-        row_fx1.addWidget(self.fx_heat_accum_cb)
+        row_fx1.addWidget(self.fx_metal_forge_cb)
         row_fx1.addStretch()
         vl.addLayout(row_fx1)
-
-        row_fx2 = QHBoxLayout()
-        row_fx2.addWidget(self.fx_anvil_v2_cb)
-        row_fx2.addWidget(self.fx_pulse_cb)
-        row_fx2.addStretch()
-        vl.addLayout(row_fx2)
-
-        row_fx3 = QHBoxLayout()
-        row_fx3.addWidget(self.fx_metal_forge_cb)
-        row_fx3.addStretch()
-        vl.addLayout(row_fx3)
 
         vfx.setLayout(vl)
         root.addWidget(vfx)
@@ -363,11 +333,8 @@ class SettingsDialog(QDialog):
 
         # Block signals to avoid spurious setattr calls on load
         for cb, attr in [
-            (self.fx_hit_numbers_cb,   'show_hit_numbers'),
-            (self.fx_heat_accum_cb,    'show_heat_accum'),
-            (self.fx_anvil_v2_cb,      'anvil_v2'),
-            (self.fx_pulse_cb,         'show_strike_pulse'),
-            (self.fx_metal_forge_cb,   'show_metal_forge'),
+            (self.fx_hit_numbers_cb, 'show_hit_numbers'),
+            (self.fx_metal_forge_cb, 'show_metal_forge'),
         ]:
             cb.blockSignals(True)
             cb.setChecked(getattr(s, attr))
@@ -390,14 +357,11 @@ class SettingsDialog(QDialog):
         in_fever = s.turbo_mode and s.fever_active
         if s.turbo_mode:
             self.turbo_radio.setChecked(True)
-        elif s.kb_mode == "charge_legacy":
-            self.charge_ex_radio.setChecked(True)
         elif s.kb_mode == "combo":
             self.combo_radio.setChecked(True)
         else:
             self.charge_radio.setChecked(True)
-        for rb in (self.charge_radio, self.combo_radio,
-                   self.charge_ex_radio, self.turbo_radio):
+        for rb in (self.charge_radio, self.combo_radio, self.turbo_radio):
             rb.setEnabled(not in_fever)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
@@ -423,8 +387,6 @@ class SettingsDialog(QDialog):
             new_mode, new_turbo = "charge", False
         elif button is self.combo_radio:
             new_mode, new_turbo = "combo",  False
-        elif button is self.charge_ex_radio:
-            new_mode, new_turbo = "charge_legacy", False
         else:  # turbo_radio
             new_mode, new_turbo = "charge", True
 
@@ -444,7 +406,6 @@ class SettingsDialog(QDialog):
         s.kb_state            = "idle"
         s.kb_active           = False
         s.space_queue         = 0
-        s.typing_pending      = False
         s.typing_wants_strike = False
         s.typing_charge       = 0
         s.typing_cooldown     = 0.0

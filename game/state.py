@@ -67,21 +67,21 @@ class GameState:
         self.last_force: int = 0
 
         # Visual
-        self.strike_flash: float = 0.0
         self.anvil_glow:   float = 0.0
         self.strike_color: tuple = (210, 120, 70)   # RGB of last strike (hammer colour)
         self.sparks: list[Spark] = []
 
         # ── Keyboard / input state machine ─────────────────────────────────
         self.kb_active: bool = False
-        self.kb_mode: str    = _sv.get("kb_mode", "charge")  # "combo" | "charge" | "charge_ex"
+        _kb_mode_raw = _sv.get("kb_mode", "charge")
+        # Migrate removed "charge_legacy" → "charge"
+        self.kb_mode: str = "charge" if _kb_mode_raw == "charge_legacy" else _kb_mode_raw
         self.kb_state: str   = "idle"     # "idle" | "strike" | "wait"
 
         # Combo mode: queued strikes
         self.space_queue: int = 0
 
         # Charge mode
-        self.typing_pending:      bool  = False
         self.typing_wants_strike: bool  = False
         self.typing_charge:       int   = 0
         self.typing_base_ms:      float = float(_sv.get("typing_base_ms", TYPING_BASE_MS))
@@ -112,8 +112,6 @@ class GameState:
 
         # ── Visual effects (saved) ─────────────────────────────────────────────
         self.show_hit_numbers:   bool = bool(_sv.get("show_hit_numbers",   True))
-        self.show_heat_accum:    bool = bool(_sv.get("show_heat_accum",    True))
-        self.show_strike_pulse:  bool = bool(_sv.get("show_strike_pulse",  False))  # 預設關閉
         self.show_metal_forge:   bool = bool(_sv.get("show_metal_forge",   True))
 
         # Hit number popups (transient)
@@ -156,7 +154,6 @@ class GameState:
         # ── Anvil visibility / style ───────────────────────────────────────
         self.hide_anvil:      bool = bool(_sv.get("hide_anvil",      False))
         self.lock_position:   bool = bool(_sv.get("lock_position",   False))
-        self.anvil_v2:        bool = bool(_sv.get("anvil_v2",        True))
         self.always_on_top:   bool = bool(_sv.get("always_on_top",   True))
 
         # Transient hover state (set by widget, not saved)
@@ -235,8 +232,6 @@ class GameState:
         self.input_heat = min(1.0, self.input_heat + 0.15)
         if self.kb_mode == "combo":
             self._handle_combo_key()
-        elif self.kb_mode == "charge_legacy":
-            self._handle_charge_legacy_key()
         else:   # "charge" — the lift/auto-slam mode
             self._handle_charge_key()
 
@@ -248,12 +243,11 @@ class GameState:
 
         if self.hit_cooldown    > 0: self.hit_cooldown    = max(0.0, self.hit_cooldown    - delta_ms)
         if self.typing_cooldown > 0: self.typing_cooldown = max(0.0, self.typing_cooldown - delta_ms)
-        if self.strike_flash    > 0: self.strike_flash    = max(0.0, self.strike_flash    - dt * 5.0)
 
         # Heat accumulation slows the glow decay rate
         if self.anvil_glow > 0:
             _glow_decay = 4.0
-            if self.show_heat_accum and self.heat_level > 0:
+            if self.heat_level > 0:
                 _glow_decay *= max(0.15, 1.0 - self.heat_level * 0.75)
             self.anvil_glow = max(0.0, self.anvil_glow - dt * _glow_decay)
         if self.heat_level > 0:
@@ -410,12 +404,9 @@ class GameState:
             "widget_x":                self.widget_x,
             "widget_y":                self.widget_y,
             "show_hit_numbers":        self.show_hit_numbers,
-            "show_heat_accum":         self.show_heat_accum,
-            "show_strike_pulse":       self.show_strike_pulse,
             "show_metal_forge":        self.show_metal_forge,
             "hide_anvil":              self.hide_anvil,
             "lock_position":           self.lock_position,
-            "anvil_v2":                self.anvil_v2,
             "always_on_top":           self.always_on_top,
             "forge_counts":            list(self.forge_counts),
             "current_metal_save":      self._metal_to_save(),
@@ -449,7 +440,6 @@ class GameState:
         self.kb_state            = "idle"
         self.space_queue         = 0
         self.typing_charge       = 0
-        self.typing_pending      = False
         self.typing_wants_strike = False
         self.typing_cooldown     = 0.0
         self.typing_max_charge   = TYPING_MAX_CHARGE
@@ -486,14 +476,11 @@ class GameState:
         self.widget_x        = None
         self.widget_y        = None
         # Visuals
-        self.strike_flash = 0.0
         self.anvil_glow   = 0.0
         self.strike_color = (210, 120, 70)
         self.sparks.clear()
         # Visual effects toggles
         self.show_hit_numbers   = True
-        self.show_heat_accum    = True
-        self.show_strike_pulse  = False
         self.show_metal_forge   = True
         self.hit_numbers        = []
         self.heat_level         = 0.0
@@ -502,7 +489,6 @@ class GameState:
         self.input_heat         = 0.0
         self.hide_anvil         = False
         self.lock_position      = False
-        self.anvil_v2           = True
         self.always_on_top      = True
         self.mouse_on_widget    = False
         # Metal forging
@@ -536,39 +522,6 @@ class GameState:
         else:
             # Queue full — count force without queuing another strike
             self.force_count += 1
-
-    def _handle_charge_legacy_key(self):
-        """蓄力模式(舊版): every key press contributes +1 charge to the upcoming hit."""
-        if not self.kb_active:
-            self.kb_active = True
-            self.kb_mode   = "charge_legacy"
-            self.kb_state  = "idle"
-            self._kb_start_mx = self.mx
-            self._kb_start_my = self.my
-
-        state = self.kb_state
-        if state == "idle":
-            # Trigger click: start a new strike AND count as the first charge slot.
-            self.typing_pending      = False
-            self.typing_wants_strike = True
-            self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
-            # No pulse yet — hammer hasn't started moving
-        elif state == "strike":
-            if self.has_hit:
-                # _on_hit() fired this frame; state machine hasn't moved to "wait"
-                # yet.  Queue as pending so we don't accumulate a stray charge.
-                self.typing_pending = True
-            else:
-                # Extra charge during the downswing — show pulse animation
-                self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
-                cf = self.typing_charge / max(1, self.typing_max_charge)
-                self.charge_pulses.append({"t": 0.0, "cf": cf})
-        elif state == "wait":
-            # Queue next strike AND pre-charge it; emit pulse for visual feedback
-            self.typing_pending = True
-            self.typing_charge  = min(self.typing_charge + 1, self.typing_max_charge)
-            cf = self.typing_charge / max(1, self.typing_max_charge)
-            self.charge_pulses.append({"t": 0.0, "cf": cf})
 
     def _handle_charge_key(self):
         """蓄力模式: clicks charge AND give an upward velocity kick.
@@ -622,7 +575,7 @@ class GameState:
         if state == "idle":
             if self.kb_mode == "combo" and self.space_queue > 0 and near_ready:
                 self.kb_state = "strike"
-            elif self.kb_mode in ("charge", "charge_legacy") and self.typing_wants_strike and near_ready:
+            elif self.kb_mode == "charge" and self.typing_wants_strike and near_ready:
                 self.typing_wants_strike = False
                 self.kb_state = "strike"
 
@@ -652,13 +605,6 @@ class GameState:
                             cf = 1.0 / max(1, self.typing_max_charge)
                             self.charge_pulses.append({"t": 0.0, "cf": cf})
                             self.vcvy = min(self.vcvy, -self.charge_ex_lift)
-                else:  # charge_legacy
-                    if self.typing_cooldown <= 0:
-                        if self.typing_pending:
-                            self.typing_pending = False
-                            self.kb_state       = "strike"
-                        else:
-                            self.kb_state = "idle"
 
     def _kb_target(self) -> tuple[float, float]:
         if self.kb_state == "strike":
@@ -668,10 +614,9 @@ class GameState:
     def _on_hit(self, hit_x: float):
         # Pre-compute charge for feature 2 popup (before typing_charge is reset below)
         _charge_n_popup = (max(1, self.typing_charge)
-                           if self.kb_mode in ("charge", "charge_legacy") else 1)
+                           if self.kb_mode == "charge" else 1)
         # Metal force — same unit as force_count increment; captured before reset
-        _metal_force = (_charge_n_popup if self.kb_mode in ("charge", "charge_legacy")
-                        else 1)
+        _metal_force = (_charge_n_popup if self.kb_mode == "charge" else 1)
         # Actual visual hit surface Y: top of metal when visible, else anvil face
         _m = self.current_metal
         if (self.show_metal_forge and not self.hide_anvil
@@ -696,13 +641,11 @@ class GameState:
 
         if self.kb_mode == "charge":
             self.typing_cooldown = 120.0          # short cooldown — just enough for visual
-        elif self.kb_mode == "charge_legacy":
-            self.typing_cooldown = self.typing_base_ms
 
         intensity   = f / 2000.0
         charge_mult = 1.0
 
-        if self.kb_mode in ("charge", "charge_legacy"):
+        if self.kb_mode == "charge":
             # typing_charge is always ≥1 (trigger click counts as first charge)
             charge_n = max(1, self.typing_charge)
             cf       = charge_n / self.typing_max_charge
@@ -729,8 +672,6 @@ class GameState:
             self.force_count  += 1
             self.strike_color  = (210, 120, 70)   # default amber
 
-        self.strike_flash = min(0.95,
-            (0.06 + intensity * 0.38) * min(2.0, charge_mult * 0.6 + 0.4))
         self.anvil_glow   = min(1.0,
             (0.5  + intensity * 0.5)  * min(1.6, charge_mult * 0.4 + 0.6))
         # Floating hit number popup
@@ -746,8 +687,7 @@ class GameState:
             })
 
         # Heat accumulation — raise heat level on each hit
-        if self.show_heat_accum:
-            self.heat_level = min(1.0, self.heat_level + 0.20)
+        self.heat_level = min(1.0, self.heat_level + 0.20)
 
         self.vcvy = -(50 + intensity * 380)
         self.vcvx = 0.0
@@ -792,7 +732,6 @@ class GameState:
         self.kb_mode             = "combo"
         self.kb_state            = "idle"
         self.typing_charge       = 0
-        self.typing_pending      = False
         self.typing_wants_strike = False
         self.typing_cooldown     = 0.0
         self.charge_prefire      = False

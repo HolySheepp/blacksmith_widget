@@ -29,18 +29,9 @@ from game.state import GameState
 
 # ── Pre-cached QColor constants (avoid per-frame allocation) ──────────────────
 
-# Anvil (classic style)
-_CA_SHADOW  = QColor(0,   0,   0,   128)
-_CA_BASE    = QColor(33,  33,  33)
+# Anvil base top-edge strip (used in v2 base highlight)
 _CA_BASE2   = QColor(44,  44,  44)
-_CA_WAIST   = QColor(38,  38,  38)
-_CA_BODY    = QColor(46,  46,  46)
-_CA_EDGE    = QColor(110, 110, 110)
-_CA_HORN1   = QColor(37,  37,  37)
-_CA_HORN2   = QColor(45,  45,  45)
-_CA_HOLE    = QColor(8,   8,   8)
 _CA_WEAR    = QColor(80,  80,  80,  102)
-_CA_BEVEL   = QColor(56,  56,  56)
 
 # Anvil v2 (icon style — lighter, sculptural silhouette)
 _CA_V2_BODY  = QColor(92,  92,  95)    # face body trapezoid
@@ -94,19 +85,6 @@ _FONT_HIT_NUM = QFont("Arial", 18)
 _FONT_HIT_NUM.setBold(True)
 
 # ── Pre-cached QBrush objects for fixed-color fills ───────────────────────────
-
-_BR_CA_SHADOW  = QBrush(_CA_SHADOW)
-_BR_CA_BASE    = QBrush(_CA_BASE)
-_BR_CA_BASE2   = QBrush(_CA_BASE2)
-_BR_CA_WAIST   = QBrush(_CA_WAIST)
-_BR_CA_BODY    = QBrush(_CA_BODY)
-_BR_CA_EDGE    = QBrush(_CA_EDGE)
-_BR_CA_HORN1   = QBrush(_CA_HORN1)
-_BR_CA_HORN2   = QBrush(_CA_HORN2)
-_BR_CA_HOLE    = QBrush(_CA_HOLE)
-_BR_CA_BEVEL   = QBrush(_CA_BEVEL)
-
-# V2 brushes
 _BR_V2_BODY  = QBrush(_CA_V2_BODY)
 _BR_V2_WAIST = QBrush(_CA_V2_WAIST)
 _BR_V2_BASE  = QBrush(_CA_V2_BASE)
@@ -148,19 +126,6 @@ _GH_LINE_PEN, _GH_CIRC_PEN, _GH_CROSS_PEN = _make_ghost_pens()
 _GH_DOT_BRUSH = QBrush(QColor(140, 200, 255, 220))
 _GH_CIRC_R    = 22.0   # drag-handle circle radius (game units)
 _GH_CROSS_LEN = 9.0    # crosshair arm length (game units)
-
-# ── Pre-built static anvil geometry (never changes) ───────────────────────────
-
-_POLY_HORN1 = QPolygonF([
-    QPointF(FACE_R,      FACE_TOP + 10),
-    QPointF(FACE_R,      FACE_TOP + 58),
-    QPointF(FACE_R + 78, FACE_TOP + 32),
-])
-_POLY_HORN2 = QPolygonF([
-    QPointF(FACE_R,      FACE_TOP + 10),
-    QPointF(FACE_R,      FACE_TOP + 22),
-    QPointF(FACE_R + 72, FACE_TOP + 30),
-])
 
 # ── V2 anvil geometry ─────────────────────────────────────────────────────────
 _V2_FACE_BW     = 15               # left-side taper (px)
@@ -247,17 +212,13 @@ def draw_frame(painter: QPainter, state: GameState):
         _draw_turbo_overlay(painter, state)
 
     if not state.hide_anvil:
-        if getattr(state, 'anvil_v2', True):
-            _draw_anvil_v2(painter, state)
-        else:
-            _draw_anvil(painter, state)
+        _draw_anvil_v2(painter, state)
         _draw_metal(painter, state)
         _draw_anvil_mode_indicator(painter, state)
     _draw_sparks(painter, state)
     _draw_embers(painter, state)
     _draw_hammer(painter, state, cos_a, sin_a)
     if not state.hide_anvil:
-        _draw_flash(painter, state)
         _draw_hud(painter, state)
     else:
         if state.mouse_on_widget and not state.lock_position:
@@ -269,82 +230,10 @@ def draw_frame(painter: QPainter, state: GameState):
 
 # ── Anvil ─────────────────────────────────────────────────────────────────────
 
-def _draw_anvil(painter: QPainter, state: GameState):
-    # Feature 4: heat gives the glow a minimum floor so it fades slowly with heat.
-    # Once heat_level reaches 0 the floor is 0 too — anvil fully cools.
-    if state.show_heat_accum and state.heat_level > 0:
-        glow = max(state.anvil_glow, state.heat_level * 0.22)
-    else:
-        glow = state.anvil_glow
-
-    painter.setPen(Qt.NoPen)
-
-    # Drop shadow
-    painter.setBrush(_BR_CA_SHADOW)
-    painter.drawEllipse(QPointF(AX, AY_BASE + 8), 155, 11)
-
-    # Base platform
-    painter.setBrush(_BR_CA_BASE)
-    painter.drawRect(QRectF(AX - 128, AY_BASE - 42, 256, 42))
-    painter.setBrush(_BR_CA_BASE2)
-    painter.drawRect(QRectF(AX - 122, AY_BASE - 44, 244, 6))
-
-    # Waist
-    painter.setBrush(_BR_CA_WAIST)
-    painter.drawRect(QRectF(AX - 72, AY_BASE - 132, 144, 90))
-
-    # Face block body
-    painter.setBrush(_BR_CA_BODY)
-    painter.drawRect(QRectF(FACE_L, FACE_TOP + 10, FACE_R - FACE_L, 122))
-
-    # Striking face surface — blends from dark grey toward the last strike colour
-    sr, sg, sb = state.strike_color
-    painter.setBrush(QBrush(QColor(
-        int(70 + glow * (sr - 70)),
-        int(70 + glow * (sg - 70)),
-        int(70 + glow * (sb - 70)),
-    )))
-    painter.drawRect(QRectF(FACE_L, FACE_TOP, FACE_R - FACE_L, 12))
-
-    # Face edge highlight
-    painter.setBrush(_BR_CA_EDGE)
-    painter.drawRect(QRectF(FACE_L + 2, FACE_TOP, FACE_R - FACE_L - 4, 3))
-
-    # Horn — pre-built polygons
-    painter.setBrush(_BR_CA_HORN1)
-    painter.drawPolygon(_POLY_HORN1)
-    painter.setBrush(_BR_CA_HORN2)
-    painter.drawPolygon(_POLY_HORN2)
-
-    # Hardy hole & Pritchel hole
-    painter.setBrush(_BR_CA_HOLE)
-    painter.drawRect(QRectF(AX - 44, FACE_TOP, 22, 11))
-    painter.drawEllipse(QPointF(AX - 72, FACE_TOP + 5), 5, 5)
-
-    # Wear marks — pre-built point pairs
-    painter.setPen(_PEN_WEAR)
-    for p1, p2 in _WEAR_LINES:
-        painter.drawLine(p1, p2)
-
-    # Right-side bevel
-    painter.setPen(Qt.NoPen)
-    painter.setBrush(_BR_CA_BEVEL)
-    painter.drawRect(QRectF(FACE_R - 8, FACE_TOP + 12, 8, 120))
-
-    # Anvil glow overlay
-    if glow > 0.01:
-        painter.setBrush(QBrush(QColor(255, 153, 0,   int(glow * 0.45 * 255))))
-        painter.drawRect(QRectF(FACE_L, FACE_TOP, FACE_R - FACE_L, 12))
-        painter.setBrush(QBrush(QColor(255, 255, 255, int(glow * 0.12 * 255))))
-        painter.drawRect(QRectF(FACE_L, FACE_TOP, FACE_R - FACE_L, 12))
-
-
-# ── Anvil v2 (icon style) ─────────────────────────────────────────────────────
-
 def _draw_anvil_v2(painter: QPainter, state: GameState):
     """Icon-inspired anvil: trapezoidal face body, defined waist, rounded base.
     Striking surface stays at FACE_TOP (same as v1) — hammer alignment unchanged."""
-    if state.show_heat_accum and state.heat_level > 0:
+    if state.heat_level > 0:
         glow = max(state.anvil_glow, state.heat_level * 0.22)
     else:
         glow = state.anvil_glow
@@ -472,7 +361,7 @@ def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float
                 rvcy + along * sin_a - perp * cos_a)
 
     cf_now = (state.typing_charge / max(1, state.typing_max_charge)
-              if state.kb_mode in ("charge", "charge_legacy") else 0.0)
+              if state.kb_mode == "charge" else 0.0)
 
     painter.setPen(Qt.NoPen)
 
@@ -640,47 +529,6 @@ def _draw_embers(painter: QPainter, state: GameState):
         painter.drawEllipse(QPointF(e.x, e.y), sz, sz)
 
 
-# ── Strike flash ──────────────────────────────────────────────────────────────
-
-def _draw_flash(painter: QPainter, state: GameState):
-    if not getattr(state, 'show_strike_pulse', True):
-        return
-    sf = state.strike_flash
-    if sf < 0.004:
-        return
-    # Flash anchored to the actual hit surface (metal top or anvil face)
-    hit_y  = getattr(state, 'last_hit_surface_y', float(FACE_TOP))
-    m      = getattr(state, 'current_metal', None)
-    if (getattr(state, 'show_metal_forge', True)
-            and not state.hide_anvil and m is not None and not m.dead
-            and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
-        fl = AX - (_V2_TR_X - _V2_TL_X) / 2
-        fw = float(_V2_TR_X - _V2_TL_X)
-    else:
-        fl = float(FACE_L)
-        fw = float(FACE_R - FACE_L)
-    spread = 60 * sf
-    sr, sg, sb = state.strike_color
-    painter.setPen(Qt.NoPen)
-    painter.setBrush(QBrush(QColor(sr, sg, sb, int(sf * 200))))
-    painter.drawRect(QRectF(
-        fl - spread, hit_y - spread * 0.5,
-        fw + spread * 2, 18 + spread,
-    ))
-    # Crit bonus flash — extra bright gold + white burst
-    if getattr(state, 'last_crit', False):
-        painter.setBrush(QBrush(QColor(255, 230, 50, int(sf * 130))))
-        painter.drawRect(QRectF(
-            fl - spread * 1.6, hit_y - spread * 0.9,
-            fw + spread * 3.2, 22 + spread * 1.6,
-        ))
-        painter.setBrush(QBrush(QColor(255, 255, 255, int(sf * 90))))
-        painter.drawRect(QRectF(
-            fl - spread * 0.5, hit_y - spread * 0.25,
-            fw + spread, 12 + spread * 0.5,
-        ))
-
-
 # ── Hit number popups (Feature 2) ────────────────────────────────────────────
 
 def _draw_hit_numbers(painter: QPainter, state: GameState):
@@ -739,45 +587,25 @@ def _draw_hit_numbers(painter: QPainter, state: GameState):
 
 def _draw_hud(painter: QPainter, state: GameState):
     # ── Counter lines ─────────────────────────────────────────────────────
-    if getattr(state, 'anvil_v2', True):
-        # V2: each counter sits inside its own anvil zone, symbol + number only
-        _v2_ctrs = [
-            (state.show_hit,   f"⚒ {state.hit_count}",   _V2_HUD_HIT_Y,   _CHUD_HIT),
-            (state.show_force, f"◈ {state.force_count}",  _V2_HUD_FORCE_Y, _CHUD_FORCE),
-            (state.show_click, f"✦ {state.click_count}",  _V2_HUD_CLICK_Y, _CHUD_CLICK),
-        ]
-        painter.setFont(_FONT_COUNTER)
-        fm = painter.fontMetrics()
-        for show, text, game_y, col in _v2_ctrs:
-            if not show:
-                continue
-            tx = AX - fm.horizontalAdvance(text) / 2
-            painter.setPen(_PEN_TEXT_SHADOW)
-            for ox, oy in _SHADOW_OFS:
-                painter.drawText(QPointF(tx + ox, game_y + oy), text)
-            painter.setPen(QPen(col))
-            painter.drawText(QPointF(tx, game_y), text)
-    else:
-        # V1: classic stacked layout with labels
-        _all = [
-            (state.show_hit,   f"⚒ 打擊  {state.hit_count}",   362, _CHUD_HIT),
-            (state.show_force, f"◈ 力道  {state.force_count}",  390, _CHUD_FORCE),
-            (state.show_click, f"✦ 點擊  {state.click_count}",  418, _CHUD_CLICK),
-        ]
-        lines = [(text, y, col) for show, text, y, col in _all if show]
-        if lines:
-            painter.setFont(_FONT_COUNTER)
-            fm = painter.fontMetrics()
-            for text, game_y, col in lines:
-                tx = AX - fm.horizontalAdvance(text) / 2
-                painter.setPen(_PEN_TEXT_SHADOW)
-                for ox, oy in _SHADOW_OFS:
-                    painter.drawText(QPointF(tx + ox, game_y + oy), text)
-                painter.setPen(QPen(col))
-                painter.drawText(QPointF(tx, game_y), text)
+    _v2_ctrs = [
+        (state.show_hit,   f"⚒ {state.hit_count}",   _V2_HUD_HIT_Y,   _CHUD_HIT),
+        (state.show_force, f"◈ {state.force_count}",  _V2_HUD_FORCE_Y, _CHUD_FORCE),
+        (state.show_click, f"✦ {state.click_count}",  _V2_HUD_CLICK_Y, _CHUD_CLICK),
+    ]
+    painter.setFont(_FONT_COUNTER)
+    fm = painter.fontMetrics()
+    for show, text, game_y, col in _v2_ctrs:
+        if not show:
+            continue
+        tx = AX - fm.horizontalAdvance(text) / 2
+        painter.setPen(_PEN_TEXT_SHADOW)
+        for ox, oy in _SHADOW_OFS:
+            painter.drawText(QPointF(tx + ox, game_y + oy), text)
+        painter.setPen(QPen(col))
+        painter.drawText(QPointF(tx, game_y), text)
 
     # ── Charge bar ────────────────────────────────────────────────────────
-    if state.show_charge_bar and state.kb_mode in ("charge", "charge_legacy") and state.kb_active:
+    if state.show_charge_bar and state.kb_mode == "charge" and state.kb_active:
         cf = state.typing_charge / max(1, state.typing_max_charge)
         bx = float(FACE_L + 10)
         by = float(FACE_TOP + 1)
@@ -804,14 +632,12 @@ def _draw_hud(painter: QPainter, state: GameState):
 # ── Anvil mode indicators (drawn AFTER metal, ON TOP of anvil face) ──────────
 
 def _draw_anvil_mode_indicator(painter: QPainter, state: GameState):
-    """根據目前模式在砧頭面體中央繪製指示器（僅 V2 砧）。"""
-    if not getattr(state, 'anvil_v2', True):
-        return
+    """根據目前模式在砧頭面體中央繪製指示器。"""
     glow = state.anvil_glow
     sr, sg, sb = state.strike_color
     if state.turbo_mode:
         _draw_turbo_lines(painter, state, glow, sr, sg, sb)
-    elif state.kb_mode in ("charge", "charge_legacy"):
+    elif state.kb_mode == "charge":
         _draw_charge_circle(painter, state, glow, sr, sg, sb)
     else:
         _draw_combo_dots(painter, state, glow, sr, sg, sb)
