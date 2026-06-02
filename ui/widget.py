@@ -492,10 +492,11 @@ class BlacksmithWidget(QWidget):
         if self._pending_update:
             tag        = self._pending_update["tag"]
             update_act = QAction(f"🆕  檢測到新版本 {tag}  點我更新！", self)
-            update_act.triggered.connect(self._prompt_and_update)
         else:
             update_act = QAction("🔍  檢查更新", self)
-            update_act.triggered.connect(self._check_update_manual)
+        # Always re-check the API before prompting — ensures we don't act on a
+        # stale cached version (e.g. v0.3.5 cached, but v0.4.1 now available).
+        update_act.triggered.connect(self._check_update_manual)
         menu.addAction(update_act)
 
         restart_act = QAction("🔄  重啟", self)
@@ -776,27 +777,31 @@ class BlacksmithWidget(QWidget):
             self.close()
 
     def _check_update_manual(self):
-        """Context-menu manual check — if update already found, go straight to prompt."""
-        if self._pending_update:
-            self._prompt_and_update()
-            return
+        """Context-menu: always do a fresh API call before acting.
+        This prevents acting on a stale cached version — e.g. the background
+        check cached v0.3.5, but v0.4.1 has since been published."""
         def _bg():
             import update as upd
             from config import VERSION
+            from PyQt5.QtCore import QMetaObject, Qt
             info = upd.fetch_latest(timeout=8)
             if info is None:
                 self._check_msg.emit("檢查更新", "無法連線至更新伺服器，請確認網路連線。")
             elif not upd.is_newer(info["tag"], VERSION):
+                # Already up-to-date — clear any stale pending flag
+                self._pending_update = None
                 self._check_msg.emit("檢查更新", f"目前已是最新版本（{VERSION}）。")
             else:
-                # Store pending + tell user the menu button has changed
+                # Refresh _pending_update with the latest data from the API,
+                # then open the update prompt on the main thread.
+                # QueuedConnection guarantees _update_ready signal is processed
+                # (i.e. _pending_update is written) before _prompt_and_update runs.
                 self._update_ready.emit(
                     info["tag"], info["url"], False,
                     info.get("notes", ""),
                 )
-                self._check_msg.emit(
-                    "發現新版本",
-                    f"找到新版本 {info['tag']}！\n右鍵選單中已出現更新按鈕，點擊即可安裝。",
+                QMetaObject.invokeMethod(
+                    self, "_prompt_and_update", Qt.QueuedConnection,
                 )
         threading.Thread(target=_bg, daemon=True).start()
 
