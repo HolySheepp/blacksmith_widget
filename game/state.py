@@ -554,10 +554,15 @@ class GameState:
             self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
             # No pulse yet — hammer hasn't started moving
         elif state == "strike":
-            # Extra charge during the downswing — show pulse animation
-            self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
-            cf = self.typing_charge / max(1, self.typing_max_charge)
-            self.charge_pulses.append({"t": 0.0, "cf": cf})
+            if self.has_hit:
+                # _on_hit() fired this frame; state machine hasn't moved to "wait"
+                # yet.  Queue as pending so we don't accumulate a stray charge.
+                self.typing_pending = True
+            else:
+                # Extra charge during the downswing — show pulse animation
+                self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
+                cf = self.typing_charge / max(1, self.typing_max_charge)
+                self.charge_pulses.append({"t": 0.0, "cf": cf})
         elif state == "wait":
             # Queue next strike AND pre-charge it; emit pulse for visual feedback
             self.typing_pending = True
@@ -591,10 +596,16 @@ class GameState:
             self.vcvy = min(self.vcvy, -self.charge_ex_lift)  # velocity floor — consistent lift
 
         elif self.kb_state == "strike":
-            # Extra charge during downswing (no lift, same as regular charge mode)
-            self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
-            cf = self.typing_charge / max(1, self.typing_max_charge)
-            self.charge_pulses.append({"t": 0.0, "cf": cf})
+            if self.has_hit:
+                # _on_hit() already fired this frame but the state machine hasn't
+                # transitioned to "wait" yet.  Treat as pre-input for the next
+                # cycle so we don't accumulate a stray charge with no armed timer.
+                self.charge_prefire = True
+            else:
+                # Extra charge during downswing (no lift, same as regular charge mode)
+                self.typing_charge = min(self.typing_charge + 1, self.typing_max_charge)
+                cf = self.typing_charge / max(1, self.typing_max_charge)
+                self.charge_pulses.append({"t": 0.0, "cf": cf})
 
         elif self.kb_state == "wait":
             # Pre-input: accept click at any time during wait.
