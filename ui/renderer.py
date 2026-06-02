@@ -85,6 +85,7 @@ _FONT_HIT_NUM = QFont("Arial", 18)
 _FONT_HIT_NUM.setBold(True)
 
 # ── Pre-cached QBrush objects for fixed-color fills ───────────────────────────
+_BR_CA_BASE2 = QBrush(_CA_BASE2)
 _BR_V2_BODY  = QBrush(_CA_V2_BODY)
 _BR_V2_WAIST = QBrush(_CA_V2_WAIST)
 _BR_V2_BASE  = QBrush(_CA_V2_BASE)
