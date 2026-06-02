@@ -106,11 +106,10 @@ class InputListener(QObject):
         self._state = None
 
         # Art-mode drag tracking (accessed only from pynput thread)
-        self._art_btn_pressed: bool  = False
-        self._art_last_x:      float = 0.0
-        self._art_last_y:      float = 0.0
-        self._art_accum:       float = 0.0   # accumulated pixels since last virtual click
-        self._art_last_emit:   float = 0.0   # monotonic time of last virtual click emit
+        self._art_last_x:    float = 0.0
+        self._art_last_y:    float = 0.0
+        self._art_accum:     float = 0.0   # accumulated px since last virtual click
+        self._art_last_emit: float = 0.0   # monotonic time of last virtual click emit
 
     def set_state(self, state) -> None:
         """Attach the GameState so drag detection can read art_mode parameters."""
@@ -125,8 +124,9 @@ class InputListener(QObject):
         self._kb_listener.start()
 
         self._mouse_listener = mouse.Listener(
-            on_click = self._on_mouse_click,
-            on_move  = self._on_mouse_move,
+            on_click  = self._on_mouse_click,
+            on_move   = self._on_mouse_move,
+            on_scroll = self._on_mouse_scroll,
         )
         self._mouse_listener.daemon = True
         self._mouse_listener.start()
@@ -170,25 +170,26 @@ class InputListener(QObject):
                 if bid in self._held:
                     return
                 self._held.add(bid)
-                # Track left-button state for art-mode drag detection
-                if button == mouse.Button.left:
-                    self._art_btn_pressed = True
-                    self._art_last_x = float(x)
-                    self._art_last_y = float(y)
-                    self._art_accum  = 0.0
                 self.key_pressed.emit("mouse")
             else:
                 self._held.discard(bid)
-                if button == mouse.Button.left:
-                    self._art_btn_pressed = False
+                # Reset drag accumulation when all inputs released
+                if not self._held:
                     self._art_accum = 0.0
         except Exception:
             pass
 
     def _on_mouse_move(self, x, y):
-        """Art-mode drag handler: accumulate distance, emit virtual clicks."""
+        """Art-mode drag handler: any held key/button + drag → virtual clicks."""
         try:
-            if not self._art_btn_pressed:
+            fx, fy = float(x), float(y)
+            dx = fx - self._art_last_x
+            dy = fy - self._art_last_y
+            self._art_last_x = fx
+            self._art_last_y = fy
+
+            # Only accumulate when something is held and art mode is active
+            if not self._held:
                 return
             s = self._state
             if s is None or not s.art_mode:
@@ -196,14 +197,8 @@ class InputListener(QObject):
             if not s.art_always_on and not _is_art_window():
                 return
 
-            # Accumulate Euclidean distance
-            dx = float(x) - self._art_last_x
-            dy = float(y) - self._art_last_y
-            self._art_last_x = float(x)
-            self._art_last_y = float(y)
             self._art_accum += math.sqrt(dx * dx + dy * dy)
-
-            threshold = max(1, s.art_drag_px)
+            threshold    = max(1, s.art_drag_px)
             min_interval = 1.0 / max(0.1, s.art_drag_max_cps)
 
             while self._art_accum >= threshold:
@@ -213,8 +208,23 @@ class InputListener(QObject):
                     self._art_last_emit = now
                     self.key_pressed.emit("key")
                 else:
-                    # Rate-limited: discard this tick but keep remainder accumulation
-                    break
+                    break   # rate-limited; keep remainder for next move event
+        except Exception:
+            pass
+
+    def _on_mouse_scroll(self, x, y, dx, dy):
+        """Art-mode scroll handler: each scroll tick → rate-limited virtual click."""
+        try:
+            s = self._state
+            if s is None or not s.art_mode:
+                return
+            if not s.art_always_on and not _is_art_window():
+                return
+            min_interval = 1.0 / max(0.1, s.art_drag_max_cps)
+            now = time.monotonic()
+            if now - self._art_last_emit >= min_interval:
+                self._art_last_emit = now
+                self.key_pressed.emit("key")
         except Exception:
             pass
 
