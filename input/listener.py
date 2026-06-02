@@ -30,8 +30,17 @@ _ART_PROC = {
     "premierepro.exe",     # newer Premiere
 }
 
-# Substrings that must appear in the window title (lower-case)
-_ART_TITLE = ("figma", "canva")
+# Substrings that must appear in the window title (lower-case).
+# Includes Canva-specific design-type suffixes for pages whose title
+# does not contain "canva" (e.g. "我的設計 - 簡報").
+_ART_TITLE = ("figma", "canva", "- 簡報", "- 傳單", "- 海報")
+
+# Mouse side/nav buttons that should NOT be tracked in _held for drag detection.
+# (They trigger page navigation; pynput often misses their release event.)
+try:
+    _MOUSE_NAV_BUTTONS = frozenset({mouse.Button.x1, mouse.Button.x2})
+except AttributeError:
+    _MOUSE_NAV_BUTTONS = frozenset()
 
 _art_cache_result: bool  = False
 _art_cache_time:   float = 0.0
@@ -169,6 +178,14 @@ class InputListener(QObject):
 
     def _on_mouse_click(self, x, y, button, pressed):
         try:
+            # Navigation side-buttons (back/forward): count as a game click on press,
+            # but never track them in _held — pynput frequently misses their release
+            # event on page navigation, causing stuck drag detection.
+            if button in _MOUSE_NAV_BUTTONS:
+                if pressed:
+                    self.key_pressed.emit("mouse")
+                return
+
             bid = f"mouse:{button}"
             if pressed:
                 if bid in self._held:
@@ -202,6 +219,11 @@ class InputListener(QObject):
             in_art = s.art_always_on or _is_art_window(custom_kws)
             s.art_window_active = in_art
             if not in_art:
+                # Prune any mouse buttons that missed their release event
+                # (e.g. left-click navigation that switched away from this window).
+                self._held = {k for k in self._held if not k.startswith("mouse:")}
+                if not self._held:
+                    self._art_accum = 0.0
                 return
 
             self._art_accum += math.sqrt(dx * dx + dy * dy)
@@ -229,6 +251,9 @@ class InputListener(QObject):
             in_art = s.art_always_on or _is_art_window(custom_kws)
             s.art_window_active = in_art
             if not in_art:
+                self._held = {k for k in self._held if not k.startswith("mouse:")}
+                if not self._held:
+                    self._art_accum = 0.0
                 return
             min_interval = 1.0 / max(0.1, s.art_scroll_max_cps)
             now = time.monotonic()
