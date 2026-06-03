@@ -267,8 +267,9 @@ class BlacksmithWidget(QWidget):
                 "padding: 2px 8px; font-size: 12px; }"
             )
             self._chat_le.returnPressed.connect(self._on_chat_submitted)
-            self._chat_le.installEventFilter(self)   # 偵測失焦
+            self._chat_le.installEventFilter(self)   # 偵測失焦/懸停
             self._chat_le_visible = False
+            self._chat_input_hovered = False  # 滑鼠是否停留在輸入框上
         else:
             self._chat_le = None
             self._chat_le_visible = False
@@ -289,6 +290,7 @@ class BlacksmithWidget(QWidget):
             self._net_client.frame_received.connect(self._on_frame_received)
             self._net_client.chat_received.connect(self._on_chat_received)
             self._net_client.connected.connect(self._on_net_connected)
+            self._net_client.disconnected.connect(self._on_net_disconnected)
 
         _wlog("[init] __init__ complete")
 
@@ -454,9 +456,18 @@ class BlacksmithWidget(QWidget):
 
     def eventFilter(self, obj, event):
         from PyQt5.QtCore import QEvent
-        if obj is self._chat_le and event.type() == QEvent.FocusOut:
-            # 失焦後延遲隱藏，讓使用者有時間移回 widget
-            QTimer.singleShot(200, self._hide_chat_input)
+        if obj is self._chat_le:
+            t = event.type()
+            if t == QEvent.FocusOut:
+                # 失焦後延遲隱藏，讓使用者有時間移回 widget
+                QTimer.singleShot(200, self._hide_chat_input)
+            elif t == QEvent.Enter:
+                # 滑鼠進入輸入框：標記懸停，取消待定的隱藏
+                self._chat_input_hovered = True
+            elif t == QEvent.Leave:
+                # 滑鼠離開輸入框：延遲隱藏
+                self._chat_input_hovered = False
+                QTimer.singleShot(200, self._hide_chat_input)
         return super().eventFilter(obj, event)
 
     def _place_dialog(self, dlg):
@@ -1026,27 +1037,46 @@ class BlacksmithWidget(QWidget):
         s = self.state
         charge = (s.typing_charge / max(1, s.typing_max_charge)
                   if s.kb_mode == "charge" else 0.0)
+        # 金屬塊狀態
+        _m = getattr(s, "current_metal", None)
+        if _m is not None and not _m.dead:
+            metal_type     = _m.type_idx
+            metal_ratio    = float(_m.ratio)
+            metal_spawn_t  = float(_m.spawn_t)
+            metal_flash_t  = float(_m.flash_t)
+            metal_complete = bool(_m.complete)
+        else:
+            metal_type     = -1
+            metal_ratio    = 0.0
+            metal_spawn_t  = 0.0
+            metal_flash_t  = 0.0
+            metal_complete = False
         data = {
-            "vcx":          s.vcx,
-            "vcy":          s.vcy,
-            "vcvx":         s.vcvx,
-            "vcvy":         s.vcvy,
-            "has_hit":      s.has_hit,
-            "anvil_glow":   s.anvil_glow,
-            "kb_state":     s.kb_state,
-            "kb_active":    s.kb_active,
-            "kb_mode":      s.kb_mode,
-            "turbo_mode":   s.turbo_mode,
-            "fever_active": s.fever_active,
-            "strike_color": list(s.strike_color),
-            "hit_count":    s.hit_count,
-            "click_count":  s.click_count,
-            "force_count":  s.force_count,
-            "play_time":    s.play_time,
-            "forge_counts": list(getattr(s, "forge_counts", [])),
-            "charge":       charge,
-            "hide_anvil":   s.hide_anvil,
-            "ui_scale":     s.ui_scale,
+            "vcx":           s.vcx,
+            "vcy":           s.vcy,
+            "vcvx":          s.vcvx,
+            "vcvy":          s.vcvy,
+            "has_hit":       s.has_hit,
+            "anvil_glow":    s.anvil_glow,
+            "kb_state":      s.kb_state,
+            "kb_active":     s.kb_active,
+            "kb_mode":       s.kb_mode,
+            "turbo_mode":    s.turbo_mode,
+            "fever_active":  s.fever_active,
+            "strike_color":  list(s.strike_color),
+            "hit_count":     s.hit_count,
+            "click_count":   s.click_count,
+            "force_count":   s.force_count,
+            "play_time":     s.play_time,
+            "forge_counts":  list(getattr(s, "forge_counts", [])),
+            "charge":        charge,
+            "hide_anvil":    s.hide_anvil,
+            "ui_scale":      s.ui_scale,
+            "metal_type":    metal_type,
+            "metal_ratio":   metal_ratio,
+            "metal_spawn_t": metal_spawn_t,
+            "metal_flash_t": metal_flash_t,
+            "metal_complete": metal_complete,
         }
         self._net_client.send_frame(data)
 
@@ -1127,6 +1157,12 @@ class BlacksmithWidget(QWidget):
         if self._auto_rejoin_pending:
             self._do_auto_rejoin()
 
+    def _on_net_disconnected(self, reason: str):
+        """伺服器斷線（重試 3 次失敗）時，清除 peer widgets 和輸入框。
+        不清除 mp_* 存檔欄位，保留以便重連後自動重加入。"""
+        self._close_all_peer_widgets()
+        self._hide_chat_input()
+
     def _try_auto_rejoin(self):
         """啟動時靜默嘗試重連並加入上次的房間。"""
         if (not _MULTI_AVAILABLE or self._net_client is None
@@ -1181,8 +1217,8 @@ class BlacksmithWidget(QWidget):
     def _hide_chat_input(self):
         if self._chat_le is None or not self._chat_le_visible:
             return
-        # 若輸入框有焦點，不立即隱藏
-        if self._chat_le.hasFocus():
+        # 若輸入框有焦點或滑鼠懸停，不立即隱藏
+        if self._chat_le.hasFocus() or self._chat_input_hovered:
             return
         self._chat_le.hide()
         self._chat_le_visible = False

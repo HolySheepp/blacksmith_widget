@@ -94,7 +94,7 @@ class PeerDisplayState:
         self.show_click = False
         self.show_charge_bar = False
         self.show_hit_numbers = False
-        self.show_metal_forge = False
+        self.show_metal_forge = True    # 顯示金屬塊（與 renderer 預設一致）
         self.current_metal = None
         self.metal_spawned = False
         self.ui_scale = ui_scale
@@ -137,6 +137,26 @@ class PeerDisplayState:
         self.force_count = int(data.get("force_count", self.force_count))
         charge_frac = float(data.get("charge", 0.0))
         self.typing_charge = int(charge_frac * self.typing_max_charge)
+
+        # 金屬塊同步
+        metal_type = int(data.get("metal_type", -1))
+        if metal_type >= 0:
+            from game.metal import MetalPiece
+            if (self.current_metal is None
+                    or self.current_metal.dead
+                    or self.current_metal.type_idx != metal_type):
+                self.current_metal = MetalPiece(metal_type)
+            m = self.current_metal
+            m.quality     = float(data.get("metal_ratio", 0.0)) * m.quality_max
+            m.spawn_t     = float(data.get("metal_spawn_t", 1.0))
+            m.flash_t     = float(data.get("metal_flash_t", 0.0))
+            m.complete    = bool(data.get("metal_complete", False))
+            m.dead        = False
+            self.metal_spawned = True
+        else:
+            if self.current_metal is not None:
+                self.current_metal.dead = True
+            self.metal_spawned = False
 
         # 本地計算：打擊時生成火花
         if self.has_hit and not prev_hit:
@@ -213,6 +233,9 @@ class PeerWidget(QWidget):
         self._muted = False
         self._name_visible = True
         self._hovered = False
+        # 本地端隱藏覆蓋：None = 跟隨 peer 自身廣播的 hide_anvil 設定
+        #   True/False = 本地強制覆蓋，不被後續 frame 重置
+        self._viewer_hide_anvil: "bool | None" = None
 
         # ── 拖曳狀態 ──────────────────────────────────────────────────────
         self._press_global: QPoint | None = None
@@ -259,6 +282,9 @@ class PeerWidget(QWidget):
     def update_from_frame(self, data: dict):
         """由 widget.py 在收到 frame 時呼叫。"""
         self._peer_state.update_from_frame(data)
+        # 套用本地端隱藏覆蓋（避免被 peer 的 frame 覆蓋重置）
+        if self._viewer_hide_anvil is not None:
+            self._peer_state.hide_anvil = self._viewer_hide_anvil
         self.update()
 
     def show_bubble(self, text: str):
@@ -513,7 +539,9 @@ class PeerWidget(QWidget):
             self._clear_bubble()
 
     def _toggle_hide_anvil(self):
-        self._peer_state.hide_anvil = not self._peer_state.hide_anvil
+        # 記錄本地覆蓋值，避免後續 frame 將鐵砧重新顯示
+        self._viewer_hide_anvil = not self._peer_state.hide_anvil
+        self._peer_state.hide_anvil = self._viewer_hide_anvil
         self.update()
 
     def _toggle_name(self):

@@ -101,7 +101,7 @@ class NetworkClient(QObject):
 
     # ── 連線 ──────────────────────────────────────────────────────────────────
 
-    def connect_to_server(self, host: str, port: int = 9527):
+    def connect_to_server(self, host: str, port: int = 8080):
         """從 Qt 主執行緒呼叫；在背景執行緒嘗試連線。"""
         if not _WS_AVAILABLE:
             self.conn_error.emit("請先安裝 websockets 套件：pip install websockets")
@@ -172,6 +172,11 @@ class NetworkClient(QObject):
             # 非預期斷線，嘗試重連
             retry_count += 1
             if retry_count > 3:
+                # 清除房間狀態，避免 UI 顯示舊房間
+                with self._lock:
+                    self._current_room = None
+                    self._room_players = []
+                    self._room_host    = None
                 self.disconnected.emit("已斷線，重試 3 次仍失敗")
                 return
             await asyncio.sleep(2)
