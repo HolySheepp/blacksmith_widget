@@ -25,6 +25,32 @@ from config import (
     get_charge_color,
 )
 
+# ── Save versioning & migration ───────────────────────────────────────────────
+# Bump _SAVE_VERSION whenever a new one-time migration is added below.
+_SAVE_VERSION = 1
+
+
+def _migrate_save(sv: dict) -> dict:
+    """Apply one-time save migrations in order and return the updated dict.
+    The result is used by GameState.__init__ for field loading; the updated
+    save_version is written back to disk on the next to_save() call."""
+    ver = int(sv.get("save_version", 0))
+    if ver >= _SAVE_VERSION:
+        return sv           # already up-to-date, nothing to do
+
+    sv = dict(sv)           # shallow copy — don't mutate the original
+
+    # ── v0 → v1 ──────────────────────────────────────────────────────────────
+    # art_scroll_max_cps default changed from 8.0 (v0.4.1) to 16.0 (v0.4.2).
+    # Only upgrade saves that still carry the exact old default value.
+    if ver < 1:
+        if sv.get("art_scroll_max_cps") == 8.0:
+            sv["art_scroll_max_cps"] = 16.0
+
+    sv["save_version"] = _SAVE_VERSION
+    return sv
+
+
 class Spark:
     __slots__ = ("x", "y", "vx", "vy", "life", "max_life", "size", "color")
 
@@ -58,8 +84,11 @@ class GameState:
         self.has_hit: bool       = False
         self.hit_cooldown: float = 0.0
 
-        # ── Three counters (loaded from save) ──────────────────────────────
+        # ── Load save + run one-time migrations ────────────────────────────
         _sv = load_save()
+        _sv = _migrate_save(_sv)   # mutates a copy; result is used below
+
+        # ── Three counters (loaded from save) ──────────────────────────────
         self.hit_count:   int = int(_sv.get("hit_count",   0))
         self.force_count: int = int(_sv.get("force_count", 0))
         self.click_count: int = int(_sv.get("click_count", 0))
@@ -399,6 +428,7 @@ class GameState:
 
     def to_save(self) -> dict:
         return {
+            "save_version":            _SAVE_VERSION,   # always write current version
             "hit_count":               self.hit_count,
             "force_count":             self.force_count,
             "click_count":             self.click_count,
