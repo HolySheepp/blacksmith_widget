@@ -40,6 +40,7 @@ class NetworkClient(QObject):
     conn_error     = pyqtSignal(str)          # 連線失敗（給 UI 顯示）
 
     room_joined    = pyqtSignal(str, list, str)  # (room_id, [player_names], host_name)
+    room_left      = pyqtSignal()                # 自己主動離開房間
     player_joined  = pyqtSignal(str)             # player_name
     player_left    = pyqtSignal(str)             # player_name
     kicked         = pyqtSignal()
@@ -272,6 +273,7 @@ class NetworkClient(QObject):
         self._current_room = None
         self._room_players = []
         self._room_host    = None
+        self.room_left.emit()
 
     def kick(self, target: str):
         self._schedule(self._send_raw({"type": "kick", "target": target}))

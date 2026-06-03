@@ -32,16 +32,6 @@ class MultiplayerDialog(QDialog):
         self._connect_signals()
         self._refresh_connection_state()
 
-        # 若未連線，自動嘗試連線至記錄 IP 或預設 IP
-        if not self._client.is_connected:
-            target = (self._state.mp_server_host
-                      if self._state and self._state.mp_server_host
-                      else self._DEFAULT_IP)
-            self._ip_edit.setText(target)
-            self._set_light("yellow")
-            self._conn_btn.setEnabled(False)
-            self._client.connect_to_server(target)
-
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
@@ -66,21 +56,6 @@ class MultiplayerDialog(QDialog):
         sep.setFrameShape(QFrame.HLine)
         sep.setFrameShadow(QFrame.Sunken)
         root.addWidget(sep)
-
-        # ── 連線區（永遠顯示） ────────────────────────────────────────────────
-        conn_row = QHBoxLayout()
-        conn_row.addWidget(QLabel("伺服器 IP："))
-
-        self._ip_edit = QLineEdit()
-        self._ip_edit.setPlaceholderText(self._DEFAULT_IP)
-        self._ip_edit.setFixedWidth(160)
-        conn_row.addWidget(self._ip_edit)
-
-        self._conn_btn = QPushButton("連線")
-        self._conn_btn.clicked.connect(self._on_conn_btn_clicked)
-        conn_row.addWidget(self._conn_btn)
-        conn_row.addStretch()
-        root.addLayout(conn_row)
 
         # ── 合作 GroupBox ─────────────────────────────────────────────────────
         coop_box = QGroupBox("合作")
@@ -108,6 +83,28 @@ class MultiplayerDialog(QDialog):
         rival_lay.addWidget(coming_lbl)
         rival_box.setLayout(rival_lay)
         root.addWidget(rival_box)
+
+        # ── 連線區（移至最下方，一般情況不需改動）──────────────────────────
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
+        sep2.setFrameShadow(QFrame.Sunken)
+        root.addWidget(sep2)
+
+        conn_row = QHBoxLayout()
+        conn_lbl = QLabel("伺服器 IP（一般情況不用改動）：")
+        conn_lbl.setStyleSheet("color: gray; font-size: 11px;")
+        conn_row.addWidget(conn_lbl)
+
+        self._ip_edit = QLineEdit()
+        self._ip_edit.setPlaceholderText(self._DEFAULT_IP)
+        self._ip_edit.setFixedWidth(130)
+        conn_row.addWidget(self._ip_edit)
+
+        self._conn_btn = QPushButton("連線")
+        self._conn_btn.setFixedWidth(54)
+        self._conn_btn.clicked.connect(self._on_conn_btn_clicked)
+        conn_row.addWidget(self._conn_btn)
+        root.addLayout(conn_row)
 
     def _build_panel_a(self) -> QFrame:
         frame = QFrame()

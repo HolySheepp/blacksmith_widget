@@ -281,6 +281,7 @@ class BlacksmithWidget(QWidget):
         # 連接 NetworkClient signals
         if self._net_client is not None:
             self._net_client.room_joined.connect(self._on_room_joined)
+            self._net_client.room_left.connect(self._on_room_left)
             self._net_client.player_joined.connect(self._on_player_joined)
             self._net_client.player_left.connect(self._on_player_left)
             self._net_client.kicked.connect(self._on_kicked_from_room)
@@ -434,7 +435,11 @@ class BlacksmithWidget(QWidget):
         self._ghost_hide_timer.stop()   # cancel any pending fade-out
         self.state.mouse_on_widget = True
         super().enterEvent(event)
-        self._show_chat_input()
+        # 只在房間中才顯示聊天輸入框
+        if self._net_client and self._net_client.current_room:
+            self._show_chat_input()
+        else:
+            self._hide_chat_input()
 
     def leaveEvent(self, event):
         # Don't hide immediately — give the player 400 ms to reach the ghost circle.
@@ -1037,6 +1042,8 @@ class BlacksmithWidget(QWidget):
             "hit_count":    s.hit_count,
             "click_count":  s.click_count,
             "force_count":  s.force_count,
+            "play_time":    s.play_time,
+            "forge_counts": list(getattr(s, "forge_counts", [])),
             "charge":       charge,
             "hide_anvil":   s.hide_anvil,
             "ui_scale":     s.ui_scale,
@@ -1072,6 +1079,11 @@ class BlacksmithWidget(QWidget):
         self.state.mp_room_id = ""
         self.state.mp_player_name = ""
         self.state.mp_server_host = ""
+        self._close_all_peer_widgets()
+        self._hide_chat_input()
+
+    def _on_room_left(self):
+        """玩家主動退出房間時清理 peer widgets 和聊天輸入框。"""
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
