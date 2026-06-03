@@ -29,6 +29,17 @@ from input.listener import KeyboardListener
 from save           import write_save
 from ui.settings    import _autostart_set, _autostart_migrate
 
+try:
+    from network        import NetworkClient
+    from ui.peer_widget import PeerWidget
+    from ui.multiplayer import MultiplayerDialog
+    _MULTI_AVAILABLE = True
+except ImportError:
+    NetworkClient = None
+    PeerWidget    = None
+    MultiplayerDialog = None
+    _MULTI_AVAILABLE = False
+
 def _wlog(msg: str) -> None:
     """Append one line to the startup log from within the widget (best-effort)."""
     try:
@@ -223,6 +234,59 @@ class BlacksmithWidget(QWidget):
         _desk.resized.connect(self._on_screen_config_changed)
         _wlog("[init] screen-change signals connected")
 
+        # ── 多人模式 ──────────────────────────────────────────────────────────────
+        self._net_client:   NetworkClient | None   = NetworkClient(self) if _MULTI_AVAILABLE else None
+        self._peer_widgets: dict[str, PeerWidget]  = {}
+        self._multi_dialog: MultiplayerDialog | None = None
+        self._auto_rejoin_pending = False   # 啟動時等待自動重連的旗標
+
+        # 自己的聊天氣泡（顯示在 widget 上方）
+        self._own_bubble_text:  str   = ""
+        self._own_bubble_alpha: float = 0.0
+        self._own_bubble_hold  = QTimer(self)
+        self._own_bubble_hold.setSingleShot(True)
+        self._own_bubble_hold.setInterval(5000)
+        self._own_bubble_hold.timeout.connect(self._start_own_bubble_fade)
+        self._own_bubble_fade  = QTimer(self)
+        self._own_bubble_fade.setInterval(100)
+        self._own_bubble_fade.timeout.connect(self._fade_own_bubble)
+
+        # 聊天輸入框（獨立的 frameless QLineEdit 視窗，定位在 widget 正上方）
+        if _MULTI_AVAILABLE:
+            from PyQt5.QtWidgets import QLineEdit
+            self._chat_le = QLineEdit()
+            self._chat_le.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+            self._chat_le.setAttribute(Qt.WA_ShowWithoutActivating)
+            self._chat_le.setPlaceholderText("說點什麼吧!")
+            self._chat_le.setFixedHeight(28)
+            self._chat_le.setStyleSheet(
+                "QLineEdit { background: rgba(0,0,0,160); color: white; "
+                "border: 1px solid rgba(255,255,255,80); border-radius: 4px; "
+                "padding: 2px 8px; font-size: 12px; }"
+            )
+            self._chat_le.returnPressed.connect(self._on_chat_submitted)
+            self._chat_le.installEventFilter(self)   # 偵測失焦
+            self._chat_le_visible = False
+        else:
+            self._chat_le = None
+            self._chat_le_visible = False
+
+        # 幀廣播計時器（20fps；在 _start_timers 中啟動，只在房間中才廣播）
+        self._frame_timer = QTimer(self)
+        self._frame_timer.setInterval(50)
+        self._frame_timer.timeout.connect(self._broadcast_frame)
+
+        # 連接 NetworkClient signals
+        if self._net_client is not None:
+            self._net_client.room_joined.connect(self._on_room_joined)
+            self._net_client.player_joined.connect(self._on_player_joined)
+            self._net_client.player_left.connect(self._on_player_left)
+            self._net_client.kicked.connect(self._on_kicked_from_room)
+            self._net_client.room_dissolved.connect(self._on_room_dissolved)
+            self._net_client.frame_received.connect(self._on_frame_received)
+            self._net_client.chat_received.connect(self._on_chat_received)
+            self._net_client.connected.connect(self._on_net_connected)
+
         _wlog("[init] __init__ complete")
 
     # ── Input listener ────────────────────────────────────────────────────────
@@ -249,6 +313,13 @@ class BlacksmithWidget(QWidget):
             if hasattr(self, "_update_timer"):
                 self._update_timer.start()
                 _wlog("[timers] _update_timer started")
+        self._frame_timer.start()
+        # 若有上次房間記錄，3 秒後靜默嘗試自動重連
+        if (_MULTI_AVAILABLE and self._net_client is not None
+                and self.state.mp_server_host
+                and self.state.mp_room_id
+                and self.state.mp_player_name):
+            QTimer.singleShot(3000, self._try_auto_rejoin)
         _wlog("[timers] _start_timers complete")
 
     def _start_listener_safe(self):
@@ -316,6 +387,9 @@ class BlacksmithWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         draw_frame(painter, self.state)
+        # 自己的聊天氣泡（widget 座標，不受 ui_scale 影響）
+        if self._own_bubble_alpha > 0.01 and self._own_bubble_text:
+            self._draw_own_bubble(painter)
         painter.end()
 
     # ── Keyboard ──────────────────────────────────────────────────────────────
@@ -358,11 +432,25 @@ class BlacksmithWidget(QWidget):
         self._ghost_hide_timer.stop()   # cancel any pending fade-out
         self.state.mouse_on_widget = True
         super().enterEvent(event)
+        self._show_chat_input()
 
     def leaveEvent(self, event):
         # Don't hide immediately — give the player 400 ms to reach the ghost circle.
         self._ghost_hide_timer.start()
         super().leaveEvent(event)
+        QTimer.singleShot(200, self._hide_chat_input)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if self._chat_le_visible:
+            self._reposition_chat_input()
+
+    def eventFilter(self, obj, event):
+        from PyQt5.QtCore import QEvent
+        if obj is self._chat_le and event.type() == QEvent.FocusOut:
+            # 失焦後延遲隱藏，讓使用者有時間移回 widget
+            QTimer.singleShot(200, self._hide_chat_input)
+        return super().eventFilter(obj, event)
 
     def _place_dialog(self, dlg):
         """Show dlg next to the widget, guaranteed fully on screen.
@@ -421,6 +509,17 @@ class BlacksmithWidget(QWidget):
                              devtools_cb=self._open_devtools,
                              always_on_top_cb=self._apply_always_on_top)
         self._settings_dialog = dlg
+        self._place_dialog(dlg)
+
+    def _open_multiplayer(self):
+        if not _MULTI_AVAILABLE:
+            return
+        if self._multi_dialog is not None and self._multi_dialog.isVisible():
+            self._multi_dialog.raise_()
+            self._multi_dialog.activateWindow()
+            return
+        dlg = MultiplayerDialog(self._net_client, self.state, self)
+        self._multi_dialog = dlg
         self._place_dialog(dlg)
 
     # ── Context menu ──────────────────────────────────────────────────────────
@@ -482,6 +581,13 @@ class BlacksmithWidget(QWidget):
         settings_act = QAction("⚙  設定", self)
         settings_act.triggered.connect(self._open_settings)
         menu.addAction(settings_act)
+
+        menu.addSeparator()
+
+        if _MULTI_AVAILABLE:
+            multi_act = QAction("👥  多人（實驗）", self)
+            multi_act.triggered.connect(self._open_multiplayer)
+            menu.addAction(multi_act)
 
         menu.addSeparator()
 
@@ -903,9 +1009,240 @@ class BlacksmithWidget(QWidget):
             self.raise_()
             self.activateWindow()
 
+    # ── 多人模式方法 ──────────────────────────────────────────────────────────
+
+    def _broadcast_frame(self):
+        if self._net_client is None:
+            return
+        if not self._net_client.is_connected:
+            return
+        if self._net_client.current_room is None:
+            return
+        s = self.state
+        charge = (s.typing_charge / max(1, s.typing_max_charge)
+                  if s.kb_mode == "charge" else 0.0)
+        data = {
+            "vcx":          s.vcx,
+            "vcy":          s.vcy,
+            "vcvx":         s.vcvx,
+            "vcvy":         s.vcvy,
+            "has_hit":      s.has_hit,
+            "anvil_glow":   s.anvil_glow,
+            "kb_state":     s.kb_state,
+            "kb_active":    s.kb_active,
+            "strike_color": list(s.strike_color),
+            "hit_count":    s.hit_count,
+            "click_count":  s.click_count,
+            "force_count":  s.force_count,
+            "charge":       charge,
+            "hide_anvil":   s.hide_anvil,
+            "ui_scale":     s.ui_scale,
+        }
+        self._net_client.send_frame(data)
+
+    def _on_room_joined(self, room_id: str, players: list, host: str):
+        """成功加入或創建房間——為其他玩家建立 PeerWidget。"""
+        # 儲存房間資訊以供下次啟動自動重連
+        if self._net_client is not None:
+            self.state.mp_room_id      = room_id
+            self.state.mp_player_name  = self._net_client.player_name or ""
+            self.state.mp_server_host  = self._net_client.server_host
+        # 關閉舊的 peer widgets（若有）
+        self._close_all_peer_widgets()
+        my_name = self._net_client.player_name if self._net_client else None
+        for name in players:
+            if name != my_name:
+                self._create_peer_widget(name)
+
+    def _on_player_joined(self, name: str):
+        my_name = self._net_client.player_name if self._net_client else None
+        if name != my_name and name not in self._peer_widgets:
+            self._create_peer_widget(name)
+
+    def _on_player_left(self, name: str):
+        pw = self._peer_widgets.pop(name, None)
+        if pw is not None:
+            pw.close()
+
+    def _on_kicked_from_room(self):
+        # 被踢除，清除房間記錄
+        self.state.mp_room_id = ""
+        self.state.mp_player_name = ""
+        self.state.mp_server_host = ""
+        self._close_all_peer_widgets()
+        self._hide_chat_input()
+
+    def _on_room_dissolved(self):
+        self._close_all_peer_widgets()
+        self._hide_chat_input()
+
+    def _on_frame_received(self, from_name: str, data: dict):
+        pw = self._peer_widgets.get(from_name)
+        if pw is not None:
+            pw.update_from_frame(data)
+
+    def _on_chat_received(self, from_name: str, text: str):
+        my_name = self._net_client.player_name if self._net_client else None
+        if from_name == my_name:
+            # 自己發的訊息 → 顯示在自己的 widget 上方
+            self._show_own_bubble(text)
+        else:
+            pw = self._peer_widgets.get(from_name)
+            if pw is not None:
+                pw.show_bubble(text)
+
+    def _create_peer_widget(self, name: str):
+        if not _MULTI_AVAILABLE:
+            return
+        pw = PeerWidget(player_name=name)
+        pw.show()
+        self._peer_widgets[name] = pw
+
+    def _close_all_peer_widgets(self):
+        for pw in self._peer_widgets.values():
+            pw.close()
+        self._peer_widgets.clear()
+
+    def _on_net_connected(self):
+        """NetworkClient 連線成功時呼叫：若為自動重連，送出加入房間請求。"""
+        if self._auto_rejoin_pending:
+            self._do_auto_rejoin()
+
+    def _try_auto_rejoin(self):
+        """啟動時靜默嘗試重連並加入上次的房間。"""
+        if (not _MULTI_AVAILABLE or self._net_client is None
+                or not self.state.mp_server_host
+                or not self.state.mp_room_id
+                or not self.state.mp_player_name):
+            return
+        if self._net_client.current_room:
+            return   # 已在房間中（理論上不應發生）
+        if self._net_client.is_connected:
+            # 已連線，直接嘗試加入
+            self._do_auto_rejoin()
+        else:
+            # 尚未連線，先連線（連線成功後 _on_net_connected 會自動呼叫 _do_auto_rejoin）
+            self._auto_rejoin_pending = True
+            self._net_client.connect_to_server(self.state.mp_server_host)
+
+    def _do_auto_rejoin(self):
+        """連線後發送 set_name + join_room（靜默，失敗不顯示對話框）。"""
+        self._auto_rejoin_pending = False
+        if self._net_client is None or self._net_client.current_room:
+            return
+        self._net_client.set_name(self.state.mp_player_name)
+        self._net_client.join_room(self.state.mp_room_id)
+
+    def _reposition_chat_input(self):
+        """把聊天輸入框定位在 widget 正上方。"""
+        if self._chat_le is None:
+            return
+        w = self.width()
+        self._chat_le.setFixedWidth(w)
+        pos = self.mapToGlobal(QPoint(0, 0))
+        self._chat_le.move(pos.x(), pos.y() - self._chat_le.height() - 4)
+
+    def _show_chat_input(self):
+        if self._chat_le is None or self._chat_le_visible:
+            return
+        if self._net_client is None or self._net_client.current_room is None:
+            return
+        self._reposition_chat_input()
+        self._chat_le.show()
+        self._chat_le_visible = True
+
+    def _hide_chat_input(self):
+        if self._chat_le is None or not self._chat_le_visible:
+            return
+        # 若輸入框有焦點，不立即隱藏
+        if self._chat_le.hasFocus():
+            return
+        self._chat_le.hide()
+        self._chat_le_visible = False
+
+    def _on_chat_submitted(self):
+        if self._chat_le is None or self._net_client is None:
+            return
+        text = self._chat_le.text().strip()
+        if not text:
+            return
+        self._chat_le.clear()
+        self._net_client.send_chat(text)
+        # 本地也顯示（伺服器會廣播回來，但本地端先預覽）
+        # 實際上伺服器廣播回來時 _on_chat_received 會處理，所以這裡不必重複
+
+    def _show_own_bubble(self, text: str):
+        self._own_bubble_text  = text
+        self._own_bubble_alpha = 1.0
+        self._own_bubble_hold.start()        # 5 秒後開始淡出
+        self._own_bubble_fade.stop()
+
+    def _start_own_bubble_fade(self):
+        self._own_bubble_fade.start()
+
+    def _fade_own_bubble(self):
+        self._own_bubble_alpha = max(0.0, self._own_bubble_alpha - 0.08)
+        if self._own_bubble_alpha <= 0.01:
+            self._own_bubble_alpha = 0.0
+            self._own_bubble_text  = ""
+            self._own_bubble_fade.stop()
+        self.update()
+
+    def _draw_own_bubble(self, painter: QPainter):
+        from PyQt5.QtGui import QColor, QPen, QBrush, QFont, QPainterPath
+        from PyQt5.QtCore import QRectF
+        import math
+
+        text  = self._own_bubble_text
+        alpha = self._own_bubble_alpha  # 0.0–1.0
+
+        painter.save()
+        # 字型
+        font = QFont("Segoe UI", 11)
+        painter.setFont(font)
+        fm = painter.fontMetrics()
+
+        # 計算文字寬高（限制最大寬度 260px）
+        max_w = min(260, self.width() - 20)
+        # 使用 boundingRect 計算文字在限定寬度內的高度
+        from PyQt5.QtCore import Qt as _Qt
+        text_rect = painter.fontMetrics().boundingRect(
+            0, 0, max_w, 200, _Qt.TextWordWrap, text
+        )
+        tw = text_rect.width()
+        th = text_rect.height()
+
+        pad_x, pad_y = 12, 8
+        bw = tw + pad_x * 2
+        bh = th + pad_y * 2
+
+        # 氣泡定位在 widget 頂端往上（外面，需換算）
+        # 因為這在 paintEvent 裡用 widget 座標，所以畫在 widget 頂部內側
+        bx = (self.width() - bw) / 2
+        by = 6.0   # 距 widget 頂端 6px
+
+        a8 = int(alpha * 255)
+
+        # 背景
+        painter.setPen(QPen(QColor(255, 255, 255, int(alpha * 60)), 1))
+        painter.setBrush(QBrush(QColor(0, 0, 0, int(alpha * 170))))
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 8, 8)
+
+        # 文字
+        painter.setPen(QColor(255, 255, 255, a8))
+        painter.drawText(
+            QRectF(bx + pad_x, by + pad_y, tw, th),
+            _Qt.TextWordWrap, text
+        )
+        painter.restore()
+
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        # 關閉所有 peer widgets 和輸入框
+        self._close_all_peer_widgets()
+        if self._chat_le is not None:
+            self._chat_le.close()
         self._save_timer.stop()
         self._timer.stop()
         if self._tray is not None:

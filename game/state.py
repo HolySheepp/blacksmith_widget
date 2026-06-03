@@ -201,6 +201,11 @@ class GameState:
         # Transient: True when the foreground window is a known design tool/site
         self.art_window_active:  bool  = False
 
+        # ── 多人模式持久化（存檔，讓玩家重開遊戲後自動重連） ─────────────────
+        self.mp_server_host:  str = str(_sv.get("mp_server_host",  ""))
+        self.mp_room_id:      str = str(_sv.get("mp_room_id",      ""))
+        self.mp_player_name:  str = str(_sv.get("mp_player_name",  ""))
+
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
 
@@ -466,6 +471,10 @@ class GameState:
             "charge_ex_idle_ms":       self.charge_ex_idle_ms,
             "art_idle_ms":             self.art_idle_ms,
             "art_custom_titles":       list(self.art_custom_titles),
+            # 多人模式持久化
+            "mp_server_host":          self.mp_server_host,
+            "mp_room_id":              self.mp_room_id,
+            "mp_player_name":          self.mp_player_name,
         }
 
     def _metal_to_save(self) -> dict | None:
@@ -566,6 +575,10 @@ class GameState:
         self.art_idle_ms        = 300.0
         self.art_custom_titles  = []
         self.art_window_active  = False
+        # 多人模式持久化
+        self.mp_server_host  = ""
+        self.mp_room_id      = ""
+        self.mp_player_name  = ""
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal
