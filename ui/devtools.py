@@ -208,8 +208,8 @@ class DevToolsDialog(QDialog):
 
         # 拖曳距離閾值
         self.art_drag_px_edit = QLineEdit()
-        self.art_drag_px_edit.setToolTip("每累積多少像素觸發一次虛擬點擊（默認 25）")
-        art_form.addRow("拖曳閾值 (px，默認 25):", self.art_drag_px_edit)
+        self.art_drag_px_edit.setToolTip("每累積多少像素觸發一次虛擬點擊（默認 20）")
+        art_form.addRow("拖曳閾值 (px，默認 20):", self.art_drag_px_edit)
 
         # 拖曳速度上限 (CPS)
         self.art_cps_slider = QSlider(Qt.Horizontal)

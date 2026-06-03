@@ -118,9 +118,11 @@ class InputListener(QObject):
         # Reference to GameState — set via set_state() before start()
         self._state = None
 
-        # Art-mode drag tracking (accessed only from pynput thread)
-        self._art_last_x:    float = 0.0
-        self._art_last_y:    float = 0.0
+        # Art-mode drag tracking (accessed only from pynput thread).
+        # Initialized to None so the first move event skips delta computation
+        # instead of computing a huge spurious delta from (0, 0) to the actual cursor.
+        self._art_last_x:    float | None = None
+        self._art_last_y:    float | None = None
         self._art_accum:     float = 0.0   # accumulated px since last virtual click
         self._art_last_emit: float = 0.0   # monotonic time of last virtual click emit
 
@@ -204,6 +206,10 @@ class InputListener(QObject):
         """Art-mode drag handler: any held key/button + drag → virtual clicks."""
         try:
             fx, fy = float(x), float(y)
+            # Skip delta on the very first event — last pos was None (uninitialized).
+            if self._art_last_x is None:
+                self._art_last_x, self._art_last_y = fx, fy
+                return
             dx = fx - self._art_last_x
             dy = fy - self._art_last_y
             self._art_last_x = fx

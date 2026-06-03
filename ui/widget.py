@@ -51,10 +51,11 @@ _UPDATE_MS     = 3_600_000   # hourly update check interval (ms)
 class BlacksmithWidget(QWidget):
 
     # Signals used to marshal results from background threads → main thread
-    _update_ready = pyqtSignal(str, str, bool, str)  # (tag, download_url, show_toast, notes)
-    _dl_progress  = pyqtSignal(int)             # download progress 0-100
-    _dl_done      = pyqtSignal(bool)            # download finished (success?)
-    _check_msg    = pyqtSignal(str, str)        # (title, body) info message
+    _update_ready   = pyqtSignal(str, str, bool, str)  # (tag, download_url, show_toast, notes)
+    _dl_progress    = pyqtSignal(int)             # download progress 0-100
+    _dl_done        = pyqtSignal(bool)            # download finished (success?)
+    _check_msg      = pyqtSignal(str, str)        # (title, body) info message
+    _clear_pending  = pyqtSignal()                # clears _pending_update on main thread
 
     def __init__(self):
         _wlog("[init] super().__init__()")
@@ -193,6 +194,7 @@ class BlacksmithWidget(QWidget):
         self._update_ready.connect(self._on_update_ready)
         self._dl_done.connect(self._on_dl_done)
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
+        self._clear_pending.connect(lambda: setattr(self, '_pending_update', None))
 
         # ── Pre-create native HWND ─────────────────────────────────────────────
         # Qt uses lazy HWND creation: the native window is created on the first
@@ -782,8 +784,8 @@ class BlacksmithWidget(QWidget):
             if info is None:
                 self._check_msg.emit("檢查更新", "無法連線至更新伺服器，請確認網路連線。")
             elif not upd.is_newer(info["tag"], VERSION):
-                # Already up-to-date — clear any stale pending flag
-                self._pending_update = None
+                # Already up-to-date — clear stale pending via signal (thread-safe)
+                self._clear_pending.emit()
                 self._check_msg.emit("檢查更新", f"目前已是最新版本（{VERSION}）。")
             else:
                 # Refresh _pending_update with the latest data from the API,
