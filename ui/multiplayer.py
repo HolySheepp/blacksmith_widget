@@ -24,6 +24,7 @@ class MultiplayerDialog(QDialog):
         self._state  = state          # GameState，用於讀寫 mp_* 欄位
         self._in_room = False
         self._waiting_for_host = False  # True = ROOM_NOT_FOUND 後等待重試
+        self._pending_rejoin_after_connect = False  # 連線成功後執行重加入
 
         self.setWindowTitle("多人模式")
         self.setWindowFlags(Qt.Dialog)          # 非模態（show() 呼叫者負責）
@@ -31,6 +32,8 @@ class MultiplayerDialog(QDialog):
         self._build_ui()
         self._connect_signals()
         self._refresh_connection_state()
+        # 開啟時自動執行智能啟動流程（連線 → 加入/創建房間）
+        self._run_startup_sequence()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
@@ -49,6 +52,7 @@ class MultiplayerDialog(QDialog):
         self._status_light = QLabel()
         self._status_light.setFixedSize(14, 14)
         self._set_light("red")
+        self._status_light.setToolTip("🟢 已連線　🟡 連線中　🔴 未連線")
         title_row.addWidget(self._status_light)
         root.addLayout(title_row)
 
@@ -329,6 +333,41 @@ class MultiplayerDialog(QDialog):
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
+    # ── 智能啟動流程 ──────────────────────────────────────────────────────────
+
+    def _run_startup_sequence(self):
+        """對話框開啟時自動判斷連線/房間狀態並採取對應動作。"""
+        if self._client.is_connected:
+            # 已連線：_refresh_connection_state 已顯示房間狀態
+            if not self._client.current_room:
+                # 在線但不在房間，嘗試重新加入/創建
+                self._try_rejoin_or_create()
+        else:
+            # 未連線：嘗試連線到記錄 IP 或預設 IP
+            target = (self._state.mp_server_host
+                      if self._state and self._state.mp_server_host
+                      else self._DEFAULT_IP)
+            self._ip_edit.setText(target)
+            self._pending_rejoin_after_connect = True
+            self._set_light("yellow")
+            self._conn_btn.setEnabled(False)
+            self._client.connect_to_server(target)
+
+    def _try_rejoin_or_create(self):
+        """已連線但不在房間：根據是否為房主決定創建或加入。"""
+        if not self._state or not self._state.mp_room_id:
+            return  # 沒有上次記錄，不自動動作
+        name = self._state.mp_player_name
+        room = self._state.mp_room_id
+        was_host = self._state.mp_was_host
+        self._client.set_name(name)
+        if was_host:
+            self._client.create_room(room)
+        else:
+            self._client.join_room(room)
+
+    # ── Slots ─────────────────────────────────────────────────────────────────
+
     def _on_conn_btn_clicked(self):
         if self._client.is_connected:
             self._set_light("yellow")
@@ -383,6 +422,7 @@ class MultiplayerDialog(QDialog):
             self._state.mp_room_id     = ""
             self._state.mp_player_name = ""
             self._state.mp_server_host = ""
+            self._state.mp_was_host    = False
         self._waiting_for_host = False
         self._switch_to_panel_a()
 
@@ -394,6 +434,10 @@ class MultiplayerDialog(QDialog):
         self._conn_btn.setEnabled(True)
         self._create_btn.setEnabled(True)
         self._join_btn.setEnabled(True)
+        # 啟動序列觸發的連線 → 繼續嘗試加入/創建房間
+        if self._pending_rejoin_after_connect:
+            self._pending_rejoin_after_connect = False
+            self._try_rejoin_or_create()
 
     def _on_disconnected(self, reason: str):
         self._set_light("red")
@@ -415,9 +459,11 @@ class MultiplayerDialog(QDialog):
     def _on_room_joined(self, room_id: str, players: list, host: str):
         # 更新 state 的記錄（以防 multiplayer.py 是加入流程的發起者）
         if self._state and self._client.player_name:
+            my_name = self._client.player_name
             self._state.mp_room_id     = room_id
-            self._state.mp_player_name = self._client.player_name
+            self._state.mp_player_name = my_name
             self._state.mp_server_host = self._client.server_host
+            self._state.mp_was_host    = (my_name == host)
         self._waiting_for_host = False
         self._switch_to_panel_b()
         self._populate_player_list()
@@ -433,6 +479,7 @@ class MultiplayerDialog(QDialog):
             self._state.mp_room_id     = ""
             self._state.mp_player_name = ""
             self._state.mp_server_host = ""
+            self._state.mp_was_host    = False
         self._waiting_for_host = False
         self._switch_to_panel_a()
         self._show_status("你已被踢出房間")
@@ -496,6 +543,7 @@ class MultiplayerDialog(QDialog):
             self._state.mp_room_id     = ""
             self._state.mp_player_name = ""
             self._state.mp_server_host = ""
+            self._state.mp_was_host    = False
         self._waiting_for_host = False
         self._name_edit.clear()
         self._room_edit.clear()

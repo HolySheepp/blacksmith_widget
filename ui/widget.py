@@ -1021,8 +1021,8 @@ class BlacksmithWidget(QWidget):
             return
         if not self._net_client.is_connected:
             return
-        if self._net_client.current_room is None:
-            return
+        # 即使不在房間也廣播，讓伺服器端能即時看到玩家統計資料
+        # 伺服器只在玩家有房間時才轉播給其他人
         s = self.state
         charge = (s.typing_charge / max(1, s.typing_max_charge)
                   if s.kb_mode == "charge" else 0.0)
@@ -1054,9 +1054,11 @@ class BlacksmithWidget(QWidget):
         """成功加入或創建房間——為其他玩家建立 PeerWidget。"""
         # 儲存房間資訊以供下次啟動自動重連
         if self._net_client is not None:
+            my_name = self._net_client.player_name or ""
             self.state.mp_room_id      = room_id
-            self.state.mp_player_name  = self._net_client.player_name or ""
+            self.state.mp_player_name  = my_name
             self.state.mp_server_host  = self._net_client.server_host
+            self.state.mp_was_host     = (my_name == host)
         # 關閉舊的 peer widgets（若有）
         self._close_all_peer_widgets()
         my_name = self._net_client.player_name if self._net_client else None
@@ -1079,11 +1081,13 @@ class BlacksmithWidget(QWidget):
         self.state.mp_room_id = ""
         self.state.mp_player_name = ""
         self.state.mp_server_host = ""
+        self.state.mp_was_host = False
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
     def _on_room_left(self):
         """玩家主動退出房間時清理 peer widgets 和聊天輸入框。"""
+        self.state.mp_was_host = False
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
@@ -1141,12 +1145,15 @@ class BlacksmithWidget(QWidget):
             self._net_client.connect_to_server(self.state.mp_server_host)
 
     def _do_auto_rejoin(self):
-        """連線後發送 set_name + join_room（靜默，失敗不顯示對話框）。"""
+        """連線後發送 set_name + join_room/create_room（靜默，失敗不顯示對話框）。"""
         self._auto_rejoin_pending = False
         if self._net_client is None or self._net_client.current_room:
             return
         self._net_client.set_name(self.state.mp_player_name)
-        self._net_client.join_room(self.state.mp_room_id)
+        if self.state.mp_was_host:
+            self._net_client.create_room(self.state.mp_room_id)
+        else:
+            self._net_client.join_room(self.state.mp_room_id)
 
     def _reposition_chat_input(self):
         """把聊天輸入框定位在鐵砧面上方約 120px 處，寬度為 widget 一半，水平置中。"""
