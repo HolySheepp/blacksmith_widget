@@ -56,6 +56,7 @@ class NetworkClient(QObject):
         self._ws = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._connected_flag: bool = False   # 可靠的連線旗標，避免依賴 ws.closed 屬性
 
         self._player_name: str | None = None
         self._current_room: str | None = None
@@ -67,7 +68,15 @@ class NetworkClient(QObject):
 
     @property
     def is_connected(self) -> bool:
-        return self._ws is not None and not getattr(self._ws, "closed", True)
+        return self._connected_flag
+
+    @property
+    def is_connecting(self) -> bool:
+        """連線中但尚未建立（thread 執行中但 ws 未設定）"""
+        with self._lock:
+            return (self._thread is not None
+                    and self._thread.is_alive()
+                    and not self._connected_flag)
 
     @property
     def current_room(self) -> str | None:
@@ -147,6 +156,7 @@ class NetworkClient(QObject):
             with self._lock:
                 self._ws = ws
                 self._server_host = host
+                self._connected_flag = True
             self.connected.emit()
             retry_count = 0
 
@@ -157,6 +167,7 @@ class NetworkClient(QObject):
             finally:
                 with self._lock:
                     self._ws = None
+                    self._connected_flag = False
 
             # 非預期斷線，嘗試重連
             retry_count += 1
@@ -256,6 +267,8 @@ class NetworkClient(QObject):
                 ws = self._ws
             if ws:
                 await ws.close()
+            with self._lock:
+                self._connected_flag = False
         self._schedule(_close())
 
     def set_name(self, name: str):

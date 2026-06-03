@@ -336,14 +336,28 @@ class MultiplayerDialog(QDialog):
     # ── 智能啟動流程 ──────────────────────────────────────────────────────────
 
     def _run_startup_sequence(self):
-        """對話框開啟時自動判斷連線/房間狀態並採取對應動作。"""
+        """對話框開啟時自動判斷連線/房間狀態並採取對應動作。
+
+        三種情況：
+        A. 已連線且在房間  → _refresh_connection_state 已處理，什麼都不做
+        B. 已連線但不在房間 → 嘗試重新加入/創建（由本 dialog 主導）
+        C. 連線中（auto-rejoin thread 執行中）→ 顯示黃燈等待，不重複嘗試連線
+           widget.py 的 _do_auto_rejoin 會處理房間加入，room_joined 信號觸發 Panel B
+        D. 未連線          → 啟動新連線，連線成功後由本 dialog 加入房間
+        """
         if self._client.is_connected:
-            # 已連線：_refresh_connection_state 已顯示房間狀態
             if not self._client.current_room:
-                # 在線但不在房間，嘗試重新加入/創建
+                # B: 已連線但不在房間
                 self._try_rejoin_or_create()
+            # else: A 已處理
+        elif self._client.is_connecting:
+            # C: 已有連線進行中（widget auto-rejoin），等待即可
+            self._set_light("yellow")
+            self._conn_btn.setEnabled(False)
+            # _pending_rejoin_after_connect 保持 False：
+            # 讓 widget._do_auto_rejoin 主導房間加入，dialog 接收 room_joined 訊號
         else:
-            # 未連線：嘗試連線到記錄 IP 或預設 IP
+            # D: 未連線，由本 dialog 啟動連線
             target = (self._state.mp_server_host
                       if self._state and self._state.mp_server_host
                       else self._DEFAULT_IP)
