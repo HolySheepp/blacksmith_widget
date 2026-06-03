@@ -62,11 +62,12 @@ _UPDATE_MS     = 3_600_000   # hourly update check interval (ms)
 class BlacksmithWidget(QWidget):
 
     # Signals used to marshal results from background threads → main thread
-    _update_ready   = pyqtSignal(str, str, bool, str)  # (tag, download_url, show_toast, notes)
-    _dl_progress    = pyqtSignal(int)             # download progress 0-100
-    _dl_done        = pyqtSignal(bool)            # download finished (success?)
-    _check_msg      = pyqtSignal(str, str)        # (title, body) info message
-    _clear_pending  = pyqtSignal()                # clears _pending_update on main thread
+    _update_ready          = pyqtSignal(str, str, bool, str)  # (tag, download_url, show_toast, notes)
+    _dl_progress           = pyqtSignal(int)             # download progress 0-100
+    _dl_done               = pyqtSignal(bool)            # download finished (success?)
+    _check_msg             = pyqtSignal(str, str)        # (title, body) info message
+    _clear_pending         = pyqtSignal()                # clears _pending_update on main thread
+    _prompt_update_requested = pyqtSignal()              # 背景執行緒通知主執行緒顯示更新對話框
 
     def __init__(self):
         _wlog("[init] super().__init__()")
@@ -206,6 +207,7 @@ class BlacksmithWidget(QWidget):
         self._dl_done.connect(self._on_dl_done)
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
         self._clear_pending.connect(lambda: setattr(self, '_pending_update', None))
+        self._prompt_update_requested.connect(self._prompt_and_update)
 
         # ── Pre-create native HWND ─────────────────────────────────────────────
         # Qt uses lazy HWND creation: the native window is created on the first
@@ -902,9 +904,7 @@ class BlacksmithWidget(QWidget):
                     info["tag"], info["url"], False,
                     info.get("notes", ""),
                 )
-                QMetaObject.invokeMethod(
-                    self, "_prompt_and_update", Qt.QueuedConnection,
-                )
+                self._prompt_update_requested.emit()
         threading.Thread(target=_bg, daemon=True).start()
 
     def _restart(self):
@@ -1030,6 +1030,9 @@ class BlacksmithWidget(QWidget):
             "anvil_glow":   s.anvil_glow,
             "kb_state":     s.kb_state,
             "kb_active":    s.kb_active,
+            "kb_mode":      s.kb_mode,
+            "turbo_mode":   s.turbo_mode,
+            "fever_active": s.fever_active,
             "strike_color": list(s.strike_color),
             "hit_count":    s.hit_count,
             "click_count":  s.click_count,
@@ -1134,13 +1137,18 @@ class BlacksmithWidget(QWidget):
         self._net_client.join_room(self.state.mp_room_id)
 
     def _reposition_chat_input(self):
-        """把聊天輸入框定位在 widget 正上方。"""
+        """把聊天輸入框定位在鐵砧面上方約 120px 處，寬度為 widget 一半，水平置中。"""
         if self._chat_le is None:
             return
-        w = self.width()
-        self._chat_le.setFixedWidth(w)
+        from config import FACE_TOP
+        chat_w = max(80, self.width() // 2)
+        self._chat_le.setFixedWidth(chat_w)
+        face_top_px = int(FACE_TOP * self.state.ui_scale)   # 鐵砧面在 widget 中的 y
+        offset_y = face_top_px - 120                        # 距鐵砧面上方 120px（widget 座標）
         pos = self.mapToGlobal(QPoint(0, 0))
-        self._chat_le.move(pos.x(), pos.y() - self._chat_le.height() - 4)
+        chat_x = pos.x() + (self.width() - chat_w) // 2
+        chat_y = pos.y() + offset_y
+        self._chat_le.move(chat_x, chat_y)
 
     def _show_chat_input(self):
         if self._chat_le is None or self._chat_le_visible:

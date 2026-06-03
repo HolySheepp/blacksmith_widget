@@ -16,6 +16,8 @@ from PyQt5.QtCore import QRegExp
 
 class MultiplayerDialog(QDialog):
 
+    _DEFAULT_IP = "172.20.39.180"
+
     def __init__(self, network_client, state=None, parent=None):
         super().__init__(parent)
         self._client = network_client
@@ -29,6 +31,16 @@ class MultiplayerDialog(QDialog):
         self._build_ui()
         self._connect_signals()
         self._refresh_connection_state()
+
+        # 若未連線，自動嘗試連線至記錄 IP 或預設 IP
+        if not self._client.is_connected:
+            target = (self._state.mp_server_host
+                      if self._state and self._state.mp_server_host
+                      else self._DEFAULT_IP)
+            self._ip_edit.setText(target)
+            self._set_light("yellow")
+            self._conn_btn.setEnabled(False)
+            self._client.connect_to_server(target)
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
@@ -60,7 +72,7 @@ class MultiplayerDialog(QDialog):
         conn_row.addWidget(QLabel("伺服器 IP："))
 
         self._ip_edit = QLineEdit()
-        self._ip_edit.setPlaceholderText("192.168.x.x")
+        self._ip_edit.setPlaceholderText(self._DEFAULT_IP)
         self._ip_edit.setFixedWidth(160)
         conn_row.addWidget(self._ip_edit)
 
@@ -178,8 +190,11 @@ class MultiplayerDialog(QDialog):
             self._name_edit.setText(self._state.mp_player_name)
         if self._state and self._state.mp_room_id:
             self._room_edit.setText(self._state.mp_room_id)
+        # IP：優先用記錄，其次用預設 IP
         if self._state and self._state.mp_server_host:
             self._ip_edit.setText(self._state.mp_server_host)
+        else:
+            self._ip_edit.setText(self._DEFAULT_IP)
 
         return frame
 
@@ -253,6 +268,11 @@ class MultiplayerDialog(QDialog):
         if connected:
             self._set_light("green")
             self._conn_btn.setText("斷線")
+            # 若已在房間中（重新開啟對話框），恢復 panel B
+            if self._client.current_room and not self._in_room:
+                self._in_room = True
+                self._panel_b.show()
+                self._populate_player_list()
         else:
             self._set_light("red")
             self._conn_btn.setText("連線")
@@ -483,3 +503,28 @@ class MultiplayerDialog(QDialog):
         self._room_edit.clear()
         self._update_saved_info_ui()
         self._hide_status()
+
+    # ── 對話框關閉 ────────────────────────────────────────────────────────────
+
+    def closeEvent(self, event):
+        """關閉時斷開 signal 連接，避免下次開啟時重複接收。"""
+        self._disconnect_signals()
+        super().closeEvent(event)
+
+    def _disconnect_signals(self):
+        c = self._client
+        for sig, slot in [
+            (c.connected,      self._on_connected),
+            (c.disconnected,   self._on_disconnected),
+            (c.conn_error,     self._on_conn_error),
+            (c.room_joined,    self._on_room_joined),
+            (c.player_joined,  self._on_player_joined),
+            (c.player_left,    self._on_player_left),
+            (c.kicked,         self._on_kicked),
+            (c.room_dissolved, self._on_room_dissolved),
+            (c.server_error,   self._on_server_error),
+        ]:
+            try:
+                sig.disconnect(slot)
+            except Exception:
+                pass

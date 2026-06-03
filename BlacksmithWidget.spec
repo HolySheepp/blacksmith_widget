@@ -7,6 +7,10 @@ hiddenimports = ['pynput.keyboard._win32', 'pynput.mouse._win32', 'pynput.keyboa
 tmp_ret = collect_all('pynput')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# websockets（多人模式）
+tmp_ret = collect_all('websockets')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
 
 a = Analysis(
     ['main.py'],

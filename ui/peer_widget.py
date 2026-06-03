@@ -336,7 +336,8 @@ class PeerWidget(QWidget):
         text = self._player_name
         tw = fm.horizontalAdvance(text)
         cx = self.width() / 2
-        ty = self.height() - 8   # 底部中央
+        # 名稱貼近鐵砧底座下方（AY_BASE * ui_scale + 小偏移）
+        ty = int(AY_BASE * self._peer_state.ui_scale) + 14
 
         # 陰影提升可讀性
         painter.setPen(QPen(QColor(0, 0, 0, 160)))

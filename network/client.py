@@ -212,7 +212,7 @@ class NetworkClient(QObject):
             self._room_host    = None
             self.room_dissolved.emit()
 
-        elif t == "server_error":
+        elif t == "error":                        # 伺服器實際送出的型別
             code = msg.get("code", "UNKNOWN")
             human = _ERROR_MESSAGES.get(code, f"伺服器錯誤：{code}")
             self.server_error.emit(code, human)
@@ -232,8 +232,12 @@ class NetworkClient(QObject):
     async def _send_raw(self, payload: dict):
         with self._lock:
             ws = self._ws
-        if ws and not getattr(ws, "closed", True):
+        if ws is None:
+            return
+        try:
             await ws.send(json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            pass   # 連線已關閉，靜默忽略
 
     def _schedule(self, coro):
         """從 Qt 主執行緒安全地排程一個協程到背景 loop。"""
