@@ -57,6 +57,15 @@ class MultiplayerDialog(QDialog):
         sep.setFrameShadow(QFrame.Sunken)
         root.addWidget(sep)
 
+        # ── 預先建立 IP 欄位（_build_panel_a 需要填入預設值）────────────────
+        self._ip_edit = QLineEdit()
+        self._ip_edit.setPlaceholderText(self._DEFAULT_IP)
+        self._ip_edit.setFixedWidth(130)
+
+        self._conn_btn = QPushButton("連線")
+        self._conn_btn.setFixedWidth(54)
+        self._conn_btn.clicked.connect(self._on_conn_btn_clicked)
+
         # ── 合作 GroupBox ─────────────────────────────────────────────────────
         coop_box = QGroupBox("合作")
         self._coop_layout = QVBoxLayout()
@@ -94,15 +103,7 @@ class MultiplayerDialog(QDialog):
         conn_lbl = QLabel("伺服器 IP（一般情況不用改動）：")
         conn_lbl.setStyleSheet("color: gray; font-size: 11px;")
         conn_row.addWidget(conn_lbl)
-
-        self._ip_edit = QLineEdit()
-        self._ip_edit.setPlaceholderText(self._DEFAULT_IP)
-        self._ip_edit.setFixedWidth(130)
         conn_row.addWidget(self._ip_edit)
-
-        self._conn_btn = QPushButton("連線")
-        self._conn_btn.setFixedWidth(54)
-        self._conn_btn.clicked.connect(self._on_conn_btn_clicked)
         conn_row.addWidget(self._conn_btn)
         root.addLayout(conn_row)
 
