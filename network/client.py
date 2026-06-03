@@ -140,13 +140,13 @@ class NetworkClient(QObject):
                 async with asyncio.timeout(8):
                     ws = await websockets.connect(uri)
             except asyncio.TimeoutError:
-                self.conn_error.emit("無法連線，請再點擊右下角連線重試")
+                self.conn_error.emit("無法連線，請確認伺服器 IP 正確且伺服器已開啟，並點擊右下角連線重試")
                 return
             except ConnectionRefusedError:
-                self.conn_error.emit("無法連線，請再點擊右下角連線重試")
+                self.conn_error.emit("無法連線，請確認伺服器 IP 正確且伺服器已開啟，並點擊右下角連線重試")
                 return
             except OSError:
-                self.conn_error.emit("無法連線，請再點擊右下角連線重試")
+                self.conn_error.emit("無法連線，請確認伺服器 IP 正確且伺服器已開啟，並點擊右下角連線重試")
                 return
             except Exception as e:
                 self.conn_error.emit(f"連線失敗：{e}")
