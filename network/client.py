@@ -35,9 +35,11 @@ class NetworkClient(QObject):
     """WebSocket 客戶端，線程安全。"""
 
     # ── Signals ───────────────────────────────────────────────────────────────
-    connected      = pyqtSignal()
-    disconnected   = pyqtSignal(str)          # 斷線原因字串
-    conn_error     = pyqtSignal(str)          # 連線失敗（給 UI 顯示）
+    connected         = pyqtSignal()
+    disconnected      = pyqtSignal(str)       # 斷線原因字串（重試全失敗後）
+    conn_error        = pyqtSignal(str)       # 連線失敗（給 UI 顯示）
+    connection_dropped = pyqtSignal()         # WebSocket 意外斷線（重試前立即觸發）
+    server_notice     = pyqtSignal(str)       # 伺服器廣播公告
 
     room_joined    = pyqtSignal(str, list, str)  # (room_id, [player_names], host_name)
     host_changed   = pyqtSignal(str)             # new_host_name（房主轉移）
@@ -170,6 +172,9 @@ class NetworkClient(QObject):
                     self._ws = None
                     self._connected_flag = False
 
+            # WebSocket 斷線（server 關閉 or 網路中斷）→ 立即通知 UI 清除 peer
+            self.connection_dropped.emit()
+
             # 非預期斷線，嘗試重連
             retry_count += 1
             if retry_count > 3:
@@ -249,6 +254,11 @@ class NetworkClient(QObject):
             from_name = msg.get("from", "")
             text      = msg.get("text", "")
             self.chat_received.emit(from_name, text)
+
+        elif t == "server_notice":
+            text = msg.get("text", "")
+            if text:
+                self.server_notice.emit(text)
 
     # ── 內部傳送工具 ──────────────────────────────────────────────────────────
 

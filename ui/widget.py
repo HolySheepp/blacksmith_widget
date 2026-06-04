@@ -294,8 +294,10 @@ class BlacksmithWidget(QWidget):
             self._net_client.chat_received.connect(self._on_chat_received)
             self._net_client.connected.connect(self._on_net_connected)
             self._net_client.disconnected.connect(self._on_net_disconnected)
+            self._net_client.connection_dropped.connect(self._on_net_connection_dropped)
             self._net_client.conn_error.connect(self._on_net_conn_error)
             self._net_client.server_error.connect(self._on_net_server_error)
+            self._net_client.server_notice.connect(self._on_server_notice)
 
         _wlog("[init] __init__ complete")
 
@@ -1234,6 +1236,19 @@ class BlacksmithWidget(QWidget):
         """NetworkClient 連線成功時呼叫：若為自動重連，送出加入房間請求。"""
         if self._auto_rejoin_pending:
             self._do_auto_rejoin()
+
+    def _on_net_connection_dropped(self):
+        """WebSocket 意外中斷（重試前立即觸發）：立即關閉所有 peer widgets。
+        重連成功後 room_joined 信號會重新建立 peer widgets。"""
+        self._close_all_peer_widgets()
+        self._hide_chat_input()
+
+    def _on_server_notice(self, text: str):
+        """伺服器廣播公告——以托盤氣泡通知顯示，讓玩家注意到。"""
+        if self._tray is not None:
+            self._tray.showMessage(
+                "📢  伺服器公告", text,
+                QSystemTrayIcon.Information, 10_000)
 
     def _on_net_conn_error(self, _msg: str):
         """連線失敗（非重試斷線）——若為自動重連嘗試，顯示氣泡通知。"""
