@@ -34,7 +34,7 @@ _GAME_W = 800
 _GAME_H = 600
 _BASE_SCALE = 0.6           # peer 預設縮小到 60%
 
-_LOOP_MS = 50              # 20 fps
+_LOOP_MS = 16              # ~60 fps — 讓 lerp 有真正的子步驟可補幀
 _LOOP_S  = _LOOP_MS / 1000.0
 
 _BUBBLE_HOLD_MS  = 5000    # 氣泡完整顯示時間
@@ -214,9 +214,10 @@ class PeerDisplayState:
 
     def tick(self, delta_s: float):
         """每幀更新（sparks 衰減 + lerp）。"""
-        # 指數 lerp（framerate-independent）：k=8 → ~50ms 趨近 33%
+        # 指數 lerp（framerate-independent）：k=12，60fps 下每幀移動 ~17%
+        # 三幀（≈50ms）後累計趨近 ~40%，動作平滑但不失響應感
         if self.lerp_enabled:
-            alpha = 1.0 - math.exp(-8.0 * delta_s)
+            alpha = 1.0 - math.exp(-12.0 * delta_s)
             self.vcx  += (self._tgt_vcx  - self.vcx)  * alpha
             self.vcy  += (self._tgt_vcy  - self.vcy)  * alpha
             self.vcvx += (self._tgt_vcvx - self.vcvx) * alpha

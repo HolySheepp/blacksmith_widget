@@ -61,6 +61,8 @@ class NetworkClient(QObject):
         self._lock = threading.Lock()
         self._connected_flag: bool = False   # 可靠的連線旗標，避免依賴 ws.closed 屬性
 
+        self._stop_requested: bool = False  # 主動斷線旗標，跳過重試邏輯
+
         self._player_name: str | None = None
         self._current_room: str | None = None
         self._room_players: list[str] = []
@@ -175,6 +177,16 @@ class NetworkClient(QObject):
             # WebSocket 斷線（server 關閉 or 網路中斷）→ 立即通知 UI 清除 peer
             self.connection_dropped.emit()
 
+            # 主動斷線：立刻結束，不重試，讓 UI 即時更新
+            if self._stop_requested:
+                self._stop_requested = False
+                with self._lock:
+                    self._current_room = None
+                    self._room_players = []
+                    self._room_host    = None
+                self.disconnected.emit("")
+                return
+
             # 非預期斷線，嘗試重連
             retry_count += 1
             if retry_count > 3:
@@ -282,7 +294,8 @@ class NetworkClient(QObject):
     # ── 傳送方法（從 Qt 主執行緒呼叫） ───────────────────────────────────────
 
     def disconnect(self):
-        """主動斷線。"""
+        """主動斷線。設定 _stop_requested 讓背景執行緒跳過重試，立即發出 disconnected 信號。"""
+        self._stop_requested = True
         async def _close():
             with self._lock:
                 ws = self._ws
