@@ -128,18 +128,25 @@ class PeerDisplayState:
         new_vcy  = float(data.get("vcy",  self.vcy))
         new_vcvx = float(data.get("vcvx", 0.0))
         new_vcvy = float(data.get("vcvy", 0.0))
+        new_has_hit = bool(data.get("has_hit", self.has_hit))
         if self.lerp_enabled:
             # 儲存目標值；tick() 每幀用指數 lerp 趨近
             self._tgt_vcx  = new_vcx
             self._tgt_vcy  = new_vcy
             self._tgt_vcvx = new_vcvx
             self._tgt_vcvy = new_vcvy
+            # 打擊瞬間強制 snap：避免 lerp 延遲導致鎚子視覺上還沒到鐵砧就先亮
+            if new_has_hit and not self.has_hit:
+                self.vcx  = new_vcx
+                self.vcy  = new_vcy
+                self.vcvx = new_vcvx
+                self.vcvy = new_vcvy
         else:
             self.vcx  = new_vcx
             self.vcy  = new_vcy
             self.vcvx = new_vcvx
             self.vcvy = new_vcvy
-        self.has_hit = bool(data.get("has_hit", self.has_hit))
+        self.has_hit = new_has_hit
         self.anvil_glow = float(data.get("anvil_glow", self.anvil_glow))
         sc = data.get("strike_color")
         if isinstance(sc, list) and len(sc) == 3:
@@ -251,13 +258,13 @@ class PeerWidget(QWidget):
         self.setMouseTracking(True)
 
         # ── 縮放 ──────────────────────────────────────────────────────────
-        self._viewer_scale = 1.0
+        self._viewer_scale = 0.75   # 預設 75%
         self._peer_state = PeerDisplayState(ui_scale=_BASE_SCALE * self._viewer_scale)
         self._apply_scale(self._viewer_scale)
 
         # ── 設定 ──────────────────────────────────────────────────────────
         self._muted = False
-        self._name_visible = True
+        self._name_visible = False   # 預設不固定顯示（hover 才出現）
         self._hovered = False
         # 本地端隱藏覆蓋：None = 顯示（預設）；True = 本地強制隱藏；False = 本地強制顯示
         # 完全由本地玩家決定，不受對方廣播的 hide_anvil 值影響
@@ -552,7 +559,7 @@ class PeerWidget(QWidget):
         menu.addAction(anvil_act)
 
         name_act = QAction(
-            "🏷  顯示名稱" if not self._name_visible else "🏷  隱藏名稱", self)
+            "🏷  固定顯示名稱" if not self._name_visible else "🏷  取消固定顯示名稱", self)
         name_act.triggered.connect(self._toggle_name)
         menu.addAction(name_act)
 

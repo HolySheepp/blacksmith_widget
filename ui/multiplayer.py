@@ -488,6 +488,10 @@ class MultiplayerDialog(QDialog):
         """主對話框的連線/斷線按鈕：使用 state 中儲存的 IP/port。"""
         if self._client.is_connected:
             self._set_light("yellow")
+            # 主動斷線前先離開房間，讓 room_left 信號把 widget.py 的
+            # _was_in_room 清成 False，避免誤觸自動重連
+            if self._client.current_room:
+                self._client.leave_room()
             self._client.disconnect()
         else:
             ip   = (self._state.mp_server_host
