@@ -25,11 +25,12 @@ except ImportError:
     websockets = None
 
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, QTimer
+from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QListWidget, QListWidgetItem, QGroupBox, QLabel, QGridLayout,
     QSplitter, QAction, QMessageBox, QLineEdit, QPushButton,
-    QDialog, QDialogButtonBox, QCheckBox, QIntValidator,
+    QDialog, QDialogButtonBox, QCheckBox,
 )
 
 # ---------------------------------------------------------------------------
