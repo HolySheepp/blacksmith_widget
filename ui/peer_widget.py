@@ -44,6 +44,10 @@ _BUBBLE_FADE_STEP = 0.08   # 每次淡出降低的 alpha
 
 _DRAG_THRESH2 = 25
 
+# 鐵砧底座視覺下緣（game 座標）= renderer._V2_BASE_BOT_Y
+# FACE_TOP(330) + face_body(57) + waist(32) + base(38) = 457
+_ANVIL_BOT_Y = FACE_TOP + 127
+
 
 # ── Peer 顯示狀態（模仿 GameState，供 renderer 使用）────────────────────────
 
@@ -495,9 +499,17 @@ class PeerWidget(QWidget):
         fm = painter.fontMetrics()
         text = self._player_name
         tw = fm.horizontalAdvance(text)
-        cx = self.width() / 2
-        # 名稱緊貼鐵砧底座（AY_BASE * ui_scale + 小偏移）
-        ty = int(AY_BASE * self._peer_state.ui_scale) + 11
+        ui = self._peer_state.ui_scale
+
+        if self._peer_state.hide_anvil:
+            # 隱藏鐵砧時：名稱在打擊點（AX, FACE_TOP）正下方 12px
+            # 水平對齊打擊點中心（AX），讓名稱貼著虛線指示器
+            cx = AX * ui
+            ty = int(FACE_TOP * ui) + 12 + fm.ascent()
+        else:
+            # 鐵砧可見時：緊貼鐵砧底座，只留 3px 間距
+            cx = self.width() / 2
+            ty = int(_ANVIL_BOT_Y * ui) + 3 + fm.ascent()
 
         # 陰影提升可讀性
         painter.setPen(QPen(QColor(0, 0, 0, 160)))
