@@ -15,9 +15,10 @@ import threading
 import time
 
 from PyQt5.QtWidgets import (QWidget, QMenu, QAction, QDialog, QVBoxLayout,
-                              QLabel, QMessageBox, QProgressBar, QSystemTrayIcon)
+                              QHBoxLayout, QLabel, QMessageBox, QProgressBar,
+                              QSystemTrayIcon, QPushButton, QSlider)
 from PyQt5.QtCore    import Qt, QTimer, QPoint, pyqtSlot, pyqtSignal
-from PyQt5.QtGui     import QPainter, QIcon, QPixmap
+from PyQt5.QtGui     import QPainter, QIcon, QPixmap, QTransform
 
 from config         import WIDGET_W, WIDGET_H
 from game.state     import GameState
@@ -425,13 +426,45 @@ class BlacksmithWidget(QWidget):
     # ── Paint ─────────────────────────────────────────────────────────────────
 
     def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        draw_frame(painter, self.state)
-        # 自己的聊天氣泡（widget 座標，不受 ui_scale 影響）
-        if self._own_bubble_alpha > 0.01 and self._own_bubble_text:
-            self._draw_own_bubble(painter)
-        painter.end()
+        if self._has_visual_transform():
+            # 先繪製到離螢幕 pixmap，再套用 transform 輸出
+            pm = QPixmap(self.size())
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            draw_frame(p, self.state)
+            if self._own_bubble_alpha > 0.01 and self._own_bubble_text:
+                self._draw_own_bubble(p)
+            p.end()
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setTransform(self._make_visual_transform())
+            painter.drawPixmap(0, 0, pm)
+            painter.end()
+        else:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            draw_frame(painter, self.state)
+            if self._own_bubble_alpha > 0.01 and self._own_bubble_text:
+                self._draw_own_bubble(painter)
+            painter.end()
+
+    def _has_visual_transform(self) -> bool:
+        return self.state.flip_h or self.state.flip_v or abs(self.state.rotation) > 0.01
+
+    def _make_visual_transform(self) -> QTransform:
+        w, h = self.width(), self.height()
+        cx, cy = w / 2.0, h / 2.0
+        t = QTransform()
+        t.translate(cx, cy)
+        if abs(self.state.rotation) > 0.01:
+            t.rotate(self.state.rotation)
+        sx = -1.0 if self.state.flip_h else 1.0
+        sy = -1.0 if self.state.flip_v else 1.0
+        if sx != 1.0 or sy != 1.0:
+            t.scale(sx, sy)
+        t.translate(-cx, -cy)
+        return t
 
     # ── Keyboard ──────────────────────────────────────────────────────────────
 
@@ -613,10 +646,27 @@ class BlacksmithWidget(QWidget):
 
         menu.addSeparator()
 
-        # ── Hide anvil toggle ─────────────────────────────────────────────
+        # ── 視覺調整 submenu ──────────────────────────────────────────────
+        visual_menu = menu.addMenu("🎨  視覺調整")
+
         hide_act = QAction("👁  顯示鐵砧" if s.hide_anvil else "🫥  隱藏鐵砧", self)
         hide_act.triggered.connect(self._toggle_hide_anvil)
-        menu.addAction(hide_act)
+        visual_menu.addAction(hide_act)
+
+        visual_menu.addSeparator()
+
+        flip_h_act = QAction(("✔  " if s.flip_h else "      ") + "左右反轉", self)
+        flip_h_act.triggered.connect(self._toggle_flip_h)
+        visual_menu.addAction(flip_h_act)
+
+        flip_v_act = QAction(("✔  " if s.flip_v else "      ") + "上下反轉", self)
+        flip_v_act.triggered.connect(self._toggle_flip_v)
+        visual_menu.addAction(flip_v_act)
+
+        rot_label = f"↻  旋轉… ({int(s.rotation)}°)" if abs(s.rotation) > 0.5 else "↻  旋轉…"
+        rotate_act = QAction(rot_label, self)
+        rotate_act.triggered.connect(self._open_rotation_dialog)
+        visual_menu.addAction(rotate_act)
 
         # ── Lock position toggle ──────────────────────────────────────────
         lock_act = QAction("🔓  解除鎖定位置" if s.lock_position else "🔒  鎖定位置", self)
@@ -711,6 +761,61 @@ class BlacksmithWidget(QWidget):
 
     def _toggle_hide_anvil(self):
         self.state.hide_anvil = not self.state.hide_anvil
+
+    def _toggle_flip_h(self):
+        self.state.flip_h = not self.state.flip_h
+
+    def _toggle_flip_v(self):
+        self.state.flip_v = not self.state.flip_v
+
+    def _open_rotation_dialog(self):
+        """非同步旋轉調整視窗：拖動滑桿即時預覽，關閉後保留值。"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("旋轉")
+        dlg.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+        dlg.setFixedWidth(320)
+
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(10)
+        lay.setContentsMargins(14, 14, 14, 14)
+
+        angle_lbl = QLabel(f"{int(self.state.rotation)}°")
+        angle_lbl.setAlignment(Qt.AlignCenter)
+        angle_lbl.setStyleSheet("font-size: 20px; font-weight: bold;")
+        lay.addWidget(angle_lbl)
+
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(-180, 180)
+        slider.setValue(int(self.state.rotation))
+        slider.setTickPosition(QSlider.TicksBothSides)
+        slider.setTickInterval(45)
+        lay.addWidget(slider)
+
+        mark_row = QHBoxLayout()
+        mark_row.addWidget(QLabel("-180°"))
+        mark_row.addStretch()
+        mark_row.addWidget(QLabel("0°"))
+        mark_row.addStretch()
+        mark_row.addWidget(QLabel("+180°"))
+        lay.addLayout(mark_row)
+
+        btn_row = QHBoxLayout()
+        reset_btn = QPushButton("重置")
+        reset_btn.clicked.connect(lambda: slider.setValue(0))
+        btn_row.addWidget(reset_btn)
+        btn_row.addStretch()
+        close_btn = QPushButton("關閉")
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+        def _on_change(val):
+            angle_lbl.setText(f"{val}°")
+            self.state.rotation = float(val)
+            self.update()
+
+        slider.valueChanged.connect(_on_change)
+        dlg.exec_()
 
     def _toggle_lock_position(self):
         self.state.lock_position = not self.state.lock_position

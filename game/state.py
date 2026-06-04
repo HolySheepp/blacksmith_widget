@@ -181,9 +181,12 @@ class GameState:
         self.fever_cooldown_duration: float = float(_sv.get("fever_cooldown_duration", FEVER_COOLDOWN))
 
         # ── Anvil visibility / style ───────────────────────────────────────
-        self.hide_anvil:      bool = bool(_sv.get("hide_anvil",      False))
-        self.lock_position:   bool = bool(_sv.get("lock_position",   False))
-        self.always_on_top:   bool = bool(_sv.get("always_on_top",   True))
+        self.hide_anvil:      bool  = bool(_sv.get("hide_anvil",      False))
+        self.lock_position:   bool  = bool(_sv.get("lock_position",   False))
+        self.always_on_top:   bool  = bool(_sv.get("always_on_top",   True))
+        self.flip_h:          bool  = bool(_sv.get("flip_h",          False))
+        self.flip_v:          bool  = bool(_sv.get("flip_v",          False))
+        self.rotation:        float = float(_sv.get("rotation",        0.0))
 
         # ── Art mode (美術模式) ────────────────────────────────────────────
         self.art_mode:           bool  = bool(_sv.get("art_mode",           True))
@@ -463,6 +466,9 @@ class GameState:
             "hide_anvil":              self.hide_anvil,
             "lock_position":           self.lock_position,
             "always_on_top":           self.always_on_top,
+            "flip_h":                  self.flip_h,
+            "flip_v":                  self.flip_v,
+            "rotation":                self.rotation,
             "forge_counts":            list(self.forge_counts),
             "current_metal_save":      self._metal_to_save(),
             "crit_rate":               self.crit_rate,
@@ -560,6 +566,9 @@ class GameState:
         self.hide_anvil         = False
         self.lock_position      = False
         self.always_on_top      = True
+        self.flip_h             = False
+        self.flip_v             = False
+        self.rotation           = 0.0
         self.mouse_on_widget    = False
         # Metal forging
         self.forge_counts        = [0] * len(METAL_TYPES)

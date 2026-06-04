@@ -14,10 +14,11 @@ import math
 import random
 import time
 
-from PyQt5.QtWidgets import QWidget, QMenu, QAction
+from PyQt5.QtWidgets import (QWidget, QMenu, QAction, QDialog,
+                             QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel)
 from PyQt5.QtCore    import Qt, QTimer, QPoint, QRect, QRectF
 from PyQt5.QtGui     import (QPainter, QColor, QPen, QBrush, QFont,
-                             QPainterPath)
+                             QPainterPath, QPixmap, QTransform)
 
 from config import (
     AX, AY_BASE, FACE_TOP, FACE_L, FACE_R,
@@ -299,6 +300,11 @@ class PeerWidget(QWidget):
         # 完全由本地玩家決定，不受對方廣播的 hide_anvil 值影響
         self._viewer_hide_anvil: "bool | None" = None
 
+        # ── 視覺調整 ──────────────────────────────────────────────────────
+        self._flip_h:    bool  = False
+        self._flip_v:    bool  = False
+        self._rotation:  float = 0.0
+
         # ── 拖曳狀態 ──────────────────────────────────────────────────────
         self._press_global: QPoint | None = None
         self._drag_offset:  QPoint | None = None
@@ -379,6 +385,9 @@ class PeerWidget(QWidget):
             "name_visible":  self._name_visible,
             "always_on_top": self._always_on_top,
             "muted":         self._muted,
+            "flip_h":        self._flip_h,
+            "flip_v":        self._flip_v,
+            "rotation":      self._rotation,
         }
 
     def apply_prefs(self, prefs: dict):
@@ -415,6 +424,13 @@ class PeerWidget(QWidget):
                     flags |= Qt.WindowStaysOnTopHint
                 self.setWindowFlags(flags)
                 self.show()   # flags 改變後需重新 show
+        # 視覺調整
+        if "flip_h" in prefs:
+            self._flip_h = bool(prefs["flip_h"])
+        if "flip_v" in prefs:
+            self._flip_v = bool(prefs["flip_v"])
+        if "rotation" in prefs:
+            self._rotation = float(prefs["rotation"])
 
     def set_lerp(self, enabled: bool):
         """切換 lerp 補幀；關閉時立即對齊目標值，避免殘留偏移。"""
@@ -468,25 +484,54 @@ class PeerWidget(QWidget):
     # ── 繪製 ──────────────────────────────────────────────────────────────────
 
     def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        if self._has_visual_transform():
+            pm = QPixmap(self.size())
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            self._paint_content(p)
+            p.end()
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setTransform(self._make_visual_transform())
+            painter.drawPixmap(0, 0, pm)
+            painter.end()
+        else:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            self._paint_content(painter)
+            painter.end()
 
-        # 1. 鐵鎚 + 鐵砧場景（draw_frame 內部會 save/scale/restore）
+    def _paint_content(self, painter: QPainter):
+        """實際繪製內容（場景 + 名稱 + 氣泡），不含視覺 transform。"""
         draw_frame(painter, self._peer_state)
 
-        # 2. 玩家名稱（widget 座標）
         painter.save()
         painter.resetTransform()
         self._draw_name(painter)
         painter.restore()
 
-        # 3. 聊天氣泡（widget 座標）
         painter.save()
         painter.resetTransform()
         self._draw_bubble(painter)
         painter.restore()
 
-        painter.end()
+    def _has_visual_transform(self) -> bool:
+        return self._flip_h or self._flip_v or abs(self._rotation) > 0.01
+
+    def _make_visual_transform(self) -> QTransform:
+        w, h = self.width(), self.height()
+        cx, cy = w / 2.0, h / 2.0
+        t = QTransform()
+        t.translate(cx, cy)
+        if abs(self._rotation) > 0.01:
+            t.rotate(self._rotation)
+        sx = -1.0 if self._flip_h else 1.0
+        sy = -1.0 if self._flip_v else 1.0
+        if sx != 1.0 or sy != 1.0:
+            t.scale(sx, sy)
+        t.translate(-cx, -cy)
+        return t
 
     def _draw_name(self, painter: QPainter):
         if not self._player_name:
@@ -656,11 +701,6 @@ class PeerWidget(QWidget):
         mute_act.triggered.connect(self._toggle_mute)
         menu.addAction(mute_act)
 
-        anvil_act = QAction(
-            "👁  顯示鐵砧" if self._peer_state.hide_anvil else "🫥  隱藏鐵砧", self)
-        anvil_act.triggered.connect(self._toggle_hide_anvil)
-        menu.addAction(anvil_act)
-
         name_act = QAction(
             "🏷  固定顯示名稱" if not self._name_visible else "🏷  取消固定顯示名稱", self)
         name_act.triggered.connect(self._toggle_name)
@@ -668,14 +708,37 @@ class PeerWidget(QWidget):
 
         menu.addSeparator()
 
-        # 縮放子選單
-        scale_menu = menu.addMenu("🔍  縮放")
+        # ── 視覺調整 submenu ──────────────────────────────────────────────
+        visual_menu = menu.addMenu("🎨  視覺調整")
+
+        anvil_act = QAction(
+            "👁  顯示鐵砧" if self._peer_state.hide_anvil else "🫥  隱藏鐵砧", self)
+        anvil_act.triggered.connect(self._toggle_hide_anvil)
+        visual_menu.addAction(anvil_act)
+
+        # 縮放（移入視覺調整）
+        scale_menu = visual_menu.addMenu("🔍  縮放")
         for label, value in self._SCALE_OPTIONS:
             act = QAction(label, self)
             act.setCheckable(True)
             act.setChecked(abs(self._viewer_scale - value) < 1e-6)
             act.triggered.connect(lambda _checked, v=value: self._apply_scale(v))
             scale_menu.addAction(act)
+
+        visual_menu.addSeparator()
+
+        flip_h_act = QAction(("✔  " if self._flip_h else "      ") + "左右反轉", self)
+        flip_h_act.triggered.connect(self._toggle_flip_h)
+        visual_menu.addAction(flip_h_act)
+
+        flip_v_act = QAction(("✔  " if self._flip_v else "      ") + "上下反轉", self)
+        flip_v_act.triggered.connect(self._toggle_flip_v)
+        visual_menu.addAction(flip_v_act)
+
+        rot_label = f"↻  旋轉… ({int(self._rotation)}°)" if abs(self._rotation) > 0.5 else "↻  旋轉…"
+        rotate_act = QAction(rot_label, self)
+        rotate_act.triggered.connect(self._open_rotation_dialog)
+        visual_menu.addAction(rotate_act)
 
         menu.addSeparator()
 
@@ -689,6 +752,60 @@ class PeerWidget(QWidget):
         menu.addAction(center_act)
 
         menu.exec_(global_pos)
+
+    def _toggle_flip_h(self):
+        self._flip_h = not self._flip_h
+
+    def _toggle_flip_v(self):
+        self._flip_v = not self._flip_v
+
+    def _open_rotation_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("旋轉")
+        dlg.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+        dlg.setFixedWidth(320)
+
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(10)
+        lay.setContentsMargins(14, 14, 14, 14)
+
+        angle_lbl = QLabel(f"{int(self._rotation)}°")
+        angle_lbl.setAlignment(Qt.AlignCenter)
+        angle_lbl.setStyleSheet("font-size: 20px; font-weight: bold;")
+        lay.addWidget(angle_lbl)
+
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(-180, 180)
+        slider.setValue(int(self._rotation))
+        slider.setTickPosition(QSlider.TicksBothSides)
+        slider.setTickInterval(45)
+        lay.addWidget(slider)
+
+        mark_row = QHBoxLayout()
+        mark_row.addWidget(QLabel("-180°"))
+        mark_row.addStretch()
+        mark_row.addWidget(QLabel("0°"))
+        mark_row.addStretch()
+        mark_row.addWidget(QLabel("+180°"))
+        lay.addLayout(mark_row)
+
+        btn_row = QHBoxLayout()
+        reset_btn = QPushButton("重置")
+        reset_btn.clicked.connect(lambda: slider.setValue(0))
+        btn_row.addWidget(reset_btn)
+        btn_row.addStretch()
+        close_btn = QPushButton("關閉")
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+        def _on_change(val):
+            angle_lbl.setText(f"{val}°")
+            self._rotation = float(val)
+            self.update()
+
+        slider.valueChanged.connect(_on_change)
+        dlg.exec_()
 
     def _toggle_always_on_top(self):
         self._always_on_top = not self._always_on_top
