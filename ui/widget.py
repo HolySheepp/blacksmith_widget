@@ -908,7 +908,13 @@ class BlacksmithWidget(QWidget):
             from PyQt5.QtCore import QMetaObject, Qt
             info = upd.fetch_latest(timeout=8)
             if info is None:
-                self._check_msg.emit("檢查更新", "無法連線至更新伺服器，請確認網路連線。")
+                # 靜默失敗：公司網路常封鎖 GitHub API，不彈窗打擾玩家
+                # 僅在 tray tooltip 顯示提示，讓玩家知道檢查過但失敗了
+                self._check_msg.emit(
+                    "檢查更新",
+                    "無法連線至更新伺服器（可能是網路限制或無網路連線）。\n"
+                    "如需更新，請至 GitHub 手動下載最新版本。",
+                )
             elif not upd.is_newer(info["tag"], VERSION):
                 # Already up-to-date — clear stale pending via signal (thread-safe)
                 self._clear_pending.emit()
