@@ -126,7 +126,7 @@ class PeerDisplayState:
         sc = data.get("strike_color")
         if isinstance(sc, list) and len(sc) == 3:
             self.strike_color = tuple(sc)
-        self.hide_anvil = bool(data.get("hide_anvil", self.hide_anvil))
+        # hide_anvil 不從網路讀取——每位玩家的螢幕由自己決定是否隱藏對方鐵砧
         self.kb_active = bool(data.get("kb_active", self.kb_active))
         self.kb_state = str(data.get("kb_state", self.kb_state))
         self.kb_mode = str(data.get("kb_mode", self.kb_mode))
@@ -218,6 +218,7 @@ class PeerWidget(QWidget):
         super().__init__(parent)
         self._player_name = player_name
 
+        self._always_on_top = True
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
@@ -233,8 +234,8 @@ class PeerWidget(QWidget):
         self._muted = False
         self._name_visible = True
         self._hovered = False
-        # 本地端隱藏覆蓋：None = 跟隨 peer 自身廣播的 hide_anvil 設定
-        #   True/False = 本地強制覆蓋，不被後續 frame 重置
+        # 本地端隱藏覆蓋：None = 顯示（預設）；True = 本地強制隱藏；False = 本地強制顯示
+        # 完全由本地玩家決定，不受對方廣播的 hide_anvil 值影響
         self._viewer_hide_anvil: "bool | None" = None
 
         # ── 拖曳狀態 ──────────────────────────────────────────────────────
@@ -275,6 +276,13 @@ class PeerWidget(QWidget):
 
     def _tick(self):
         self._peer_state.tick(_LOOP_S)
+        # ghost guide：僅在本地隱藏鐵砧時才顯示虛線指示器
+        if self._peer_state.hide_anvil:
+            self._peer_state.mouse_on_widget = self._hovered
+            self._peer_state.lock_position   = False
+        else:
+            self._peer_state.mouse_on_widget = False
+            self._peer_state.lock_position   = True
         self.update()
 
     # ── 公開 API ──────────────────────────────────────────────────────────────
@@ -527,11 +535,24 @@ class PeerWidget(QWidget):
 
         menu.addSeparator()
 
+        top_act = QAction(
+            "🔝  取消置頂" if self._always_on_top else "🔝  永遠置頂", self)
+        top_act.triggered.connect(self._toggle_always_on_top)
+        menu.addAction(top_act)
+
         center_act = QAction("📌  移動到螢幕中央", self)
         center_act.triggered.connect(self._move_to_center)
         menu.addAction(center_act)
 
         menu.exec_(global_pos)
+
+    def _toggle_always_on_top(self):
+        self._always_on_top = not self._always_on_top
+        if self._always_on_top:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        else:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
+        self.show()   # setWindowFlags 後需重新 show 才生效
 
     def _toggle_mute(self):
         self._muted = not self._muted

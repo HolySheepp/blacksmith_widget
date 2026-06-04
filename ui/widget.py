@@ -294,6 +294,7 @@ class BlacksmithWidget(QWidget):
             self._net_client.chat_received.connect(self._on_chat_received)
             self._net_client.connected.connect(self._on_net_connected)
             self._net_client.disconnected.connect(self._on_net_disconnected)
+            self._net_client.conn_error.connect(self._on_net_conn_error)
             self._net_client.server_error.connect(self._on_net_server_error)
 
         _wlog("[init] __init__ complete")
@@ -1148,7 +1149,7 @@ class BlacksmithWidget(QWidget):
             "play_time":     s.play_time,
             "forge_counts":  list(getattr(s, "forge_counts", [])),
             "charge":        charge,
-            "hide_anvil":    s.hide_anvil,
+            # hide_anvil 不廣播——每位玩家在自己螢幕上自行決定是否隱藏對方鐵砧
             "ui_scale":      s.ui_scale,
             "metal_type":    metal_type,
             "metal_ratio":   metal_ratio,
@@ -1233,6 +1234,17 @@ class BlacksmithWidget(QWidget):
         """NetworkClient 連線成功時呼叫：若為自動重連，送出加入房間請求。"""
         if self._auto_rejoin_pending:
             self._do_auto_rejoin()
+
+    def _on_net_conn_error(self, _msg: str):
+        """連線失敗（非重試斷線）——若為自動重連嘗試，顯示氣泡通知。"""
+        if self._auto_rejoin_pending:
+            self._auto_rejoin_pending = False
+            note = ("連線失敗，無法加入上次遊玩所在房間，"
+                    "請檢查網路連線，目前為單人模式")
+            if self._tray is not None:
+                self._tray.showMessage(
+                    "鐵匠鋪小工具", note,
+                    QSystemTrayIcon.Warning, 6000)
 
     def _on_net_disconnected(self, reason: str):
         """伺服器斷線（重試 3 次失敗）時，清除 peer widgets 和輸入框。
