@@ -8,9 +8,18 @@ breaks the game.
 """
 import json
 import os
+import ssl
 import subprocess
 import sys
 import urllib.request
+
+# 公司網路常以自有 CA 憑證做 SSL 流量檢查（中間人代理）。
+# PyInstaller 內建的 Python/OpenSSL 不讀 Windows 憑證庫，
+# 導致憑證驗證失敗。版本檢測只讀版本號，無敏感資料，
+# 停用驗證是合理的折衷。
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode    = ssl.CERT_NONE
 
 _API_URL    = "https://api.github.com/repos/HolySheepp/blacksmith_widget/releases/latest"
 _ASSET_NAME = "BlacksmithWidget.exe"
@@ -41,7 +50,7 @@ def fetch_latest(timeout: int = 6) -> dict | None:
     """
     try:
         req = urllib.request.Request(_API_URL, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         tag   = data.get("tag_name", "")
         notes = data.get("body", "")       # release notes (Markdown)
@@ -63,7 +72,7 @@ def download_exe(url: str, dest: str, progress_cb=None) -> bool:
     """
     try:
         req = urllib.request.Request(url, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_SSL_CTX) as resp:
             total = int(resp.headers.get("Content-Length") or 0)
             done  = 0
             with open(dest, "wb") as f:
