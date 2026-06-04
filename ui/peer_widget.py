@@ -339,6 +339,53 @@ class PeerWidget(QWidget):
             self._peer_state.hide_anvil = self._viewer_hide_anvil
         self.update()
 
+    def get_prefs(self) -> dict:
+        """回傳目前的外觀/位置偏好，供 widget.py 持久化到存檔。"""
+        return {
+            "x":             self.x(),
+            "y":             self.y(),
+            "scale":         self._viewer_scale,
+            "hide_anvil":    self._viewer_hide_anvil,
+            "name_visible":  self._name_visible,
+            "always_on_top": self._always_on_top,
+            "muted":         self._muted,
+        }
+
+    def apply_prefs(self, prefs: dict):
+        """套用存檔中的偏好；缺少的鍵保持目前預設值。"""
+        if not prefs:
+            return
+        # 位置
+        x, y = prefs.get("x"), prefs.get("y")
+        if x is not None and y is not None:
+            self.move(int(x), int(y))
+        # 縮放
+        scale = prefs.get("scale")
+        if scale is not None:
+            self._apply_scale(float(scale))
+        # 本地隱藏砧
+        hide_anvil = prefs.get("hide_anvil")
+        if hide_anvil is not None:
+            self._viewer_hide_anvil = bool(hide_anvil)
+            self._peer_state.hide_anvil = bool(hide_anvil)
+        # 固定顯示名稱
+        if "name_visible" in prefs:
+            self._name_visible = bool(prefs["name_visible"])
+        # 靜音
+        if "muted" in prefs:
+            self._muted = bool(prefs["muted"])
+        # 置頂（flags 改變需要重新 show）
+        always_on_top = prefs.get("always_on_top")
+        if always_on_top is not None:
+            target = bool(always_on_top)
+            if self._always_on_top != target:
+                self._always_on_top = target
+                flags = Qt.FramelessWindowHint | Qt.Tool
+                if target:
+                    flags |= Qt.WindowStaysOnTopHint
+                self.setWindowFlags(flags)
+                self.show()   # flags 改變後需重新 show
+
     def set_lerp(self, enabled: bool):
         """切換 lerp 補幀；關閉時立即對齊目標值，避免殘留偏移。"""
         self._peer_state.lerp_enabled = enabled

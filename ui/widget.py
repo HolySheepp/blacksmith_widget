@@ -383,6 +383,21 @@ class BlacksmithWidget(QWidget):
         self.raise_()
         self.activateWindow()
 
+    def _move_to_center_or_all(self):
+        """托盤選單中央按鈕：若有 peer widget 則一次把所有鐵砧（含自己）移到中央。"""
+        self._move_to_center()
+        for pw in self._peer_widgets.values():
+            pw._move_to_center()
+
+    def _update_tray_center_text(self):
+        """根據是否有 peer widget，動態更新托盤選單按鈕文字。"""
+        if not hasattr(self, '_tray_center_act') or self._tray_center_act is None:
+            return
+        if self._peer_widgets:
+            self._tray_center_act.setText("📌  所有鐵砧移回中央")
+        else:
+            self._tray_center_act.setText("📌  移回螢幕中央")
+
     # ── Game loop ─────────────────────────────────────────────────────────────
 
     def _tick(self):
@@ -395,7 +410,13 @@ class BlacksmithWidget(QWidget):
         self.update()
 
     def _autosave(self):
+        self._collect_peer_prefs()   # 儲存前快照目前 peer widget 位置/狀態
         write_save(self.state.to_save())
+
+    def _collect_peer_prefs(self):
+        """快照所有開啟的 peer widget 的偏好，寫入 state.mp_peer_prefs。"""
+        for name, pw in self._peer_widgets.items():
+            self.state.mp_peer_prefs[name] = pw.get_prefs()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1042,9 +1063,9 @@ class BlacksmithWidget(QWidget):
         s_act.triggered.connect(self._open_settings)
         menu.addAction(s_act)
 
-        c_act = QAction("📌  移回螢幕中央", menu)
-        c_act.triggered.connect(self._move_to_center)
-        menu.addAction(c_act)
+        self._tray_center_act = QAction("📌  移回螢幕中央", menu)
+        self._tray_center_act.triggered.connect(self._move_to_center_or_all)
+        menu.addAction(self._tray_center_act)
 
         self._tray_top_act = QAction(
             "🔝  取消永遠置頂" if self.state.always_on_top else "🔝  永遠置頂",
@@ -1199,7 +1220,9 @@ class BlacksmithWidget(QWidget):
     def _on_player_left(self, name: str):
         pw = self._peer_widgets.pop(name, None)
         if pw is not None:
+            self.state.mp_peer_prefs[name] = pw.get_prefs()   # 儲存偏好再關閉
             pw.close()
+        self._update_tray_center_text()
 
     def _on_kicked_from_room(self):
         # 被踢除：主動（admin 行為），不觸發自動重連
@@ -1246,12 +1269,17 @@ class BlacksmithWidget(QWidget):
         pw = PeerWidget(player_name=name)
         pw.set_lerp(self.state.mp_lerp)   # 繼承目前的 lerp 設定
         pw.show()
+        # 還原此玩家的上次偏好（位置、縮放、隱藏砧、名稱固定、靜音、置頂）
+        pw.apply_prefs(self.state.mp_peer_prefs.get(name, {}))
         self._peer_widgets[name] = pw
+        self._update_tray_center_text()
 
     def _close_all_peer_widgets(self):
+        self._collect_peer_prefs()   # 關閉前快照所有位置/狀態
         for pw in self._peer_widgets.values():
             pw.close()
         self._peer_widgets.clear()
+        self._update_tray_center_text()
 
     def _on_net_connected(self):
         """NetworkClient 連線成功時呼叫：若為自動重連，送出加入房間請求。"""
