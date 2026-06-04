@@ -62,7 +62,7 @@ _UPDATE_MS     = 3_600_000   # hourly update check interval (ms)
 class BlacksmithWidget(QWidget):
 
     # Signals used to marshal results from background threads → main thread
-    _update_ready          = pyqtSignal(str, str, bool, str)  # (tag, download_url, show_toast, notes)
+    _update_ready          = pyqtSignal(str, str, bool, str, str)  # (tag, url, show_toast, notes, page_url)
     _dl_progress           = pyqtSignal(int)             # download progress 0-100
     _dl_done               = pyqtSignal(bool)            # download finished (success?)
     _check_msg             = pyqtSignal(str, str)        # (title, body) info message
@@ -705,12 +705,12 @@ class BlacksmithWidget(QWidget):
         if info and upd.is_newer(info["tag"], VERSION):
             self._update_ready.emit(
                 info["tag"], info["url"], is_startup,
-                info.get("notes", ""),
+                info.get("notes", ""), info.get("page_url", ""),
             )
 
-    def _on_update_ready(self, tag: str, url: str, show_toast: bool, notes: str):
+    def _on_update_ready(self, tag: str, url: str, show_toast: bool, notes: str, page_url: str = ""):
         """Main thread: store pending update; optionally show toast bubble."""
-        self._pending_update = {"tag": tag, "url": url, "notes": notes}
+        self._pending_update = {"tag": tag, "url": url, "notes": notes, "page_url": page_url}
         if show_toast:
             self._show_update_toast(tag)
 
@@ -870,10 +870,46 @@ class BlacksmithWidget(QWidget):
                 self._update_dlg.close()
                 self._update_dlg     = None
                 self._update_dlg_lbl = None
-            QMessageBox.warning(
-                self, "下載失敗",
-                "下載失敗，請稍後再試，或至 GitHub 手動下載最新版本。",
+            self._show_dl_failed_dialog()
+
+    def _show_dl_failed_dialog(self):
+        """下載失敗時顯示對話框，提供在瀏覽器手動下載的按鈕。"""
+        import webbrowser
+        from PyQt5.QtWidgets import QDialogButtonBox
+
+        pu = self._pending_update  # {"tag", "url", "page_url", "notes"}
+        page_url = (pu.get("page_url", "") or pu.get("url", "")) if pu else ""
+        tag      = pu.get("tag", "") if pu else ""
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("下載失敗")
+        dlg.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+        dlg.setMinimumWidth(360)
+
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(14, 12, 14, 14)
+        lay.setSpacing(10)
+
+        msg = QLabel(
+            "自動下載失敗（可能是公司網路 SSL 限制）。\n\n"
+            "請點擊下方按鈕，用瀏覽器手動下載最新版本：\n"
+            f"瀏覽器使用系統憑證，可正常通過公司 Proxy。"
+        )
+        msg.setWordWrap(True)
+        lay.addWidget(msg)
+
+        buttons = QDialogButtonBox()
+        if page_url:
+            btn_open = buttons.addButton(
+                f"🌐  在瀏覽器開啟下載頁面 {tag}",
+                QDialogButtonBox.AcceptRole,
             )
+            btn_open.clicked.connect(lambda: webbrowser.open(page_url))
+        btn_close = buttons.addButton("關閉", QDialogButtonBox.RejectRole)
+        btn_close.clicked.connect(dlg.reject)
+        lay.addWidget(buttons)
+
+        dlg.exec_()
 
     def _on_restart_countdown(self):
         """Called every second after a successful download; restarts at 0."""
@@ -926,7 +962,7 @@ class BlacksmithWidget(QWidget):
                 # (i.e. _pending_update is written) before _prompt_and_update runs.
                 self._update_ready.emit(
                     info["tag"], info["url"], False,
-                    info.get("notes", ""),
+                    info.get("notes", ""), info.get("page_url", ""),
                 )
                 self._prompt_update_requested.emit()
         threading.Thread(target=_bg, daemon=True).start()

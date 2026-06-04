@@ -46,8 +46,10 @@ def is_newer(remote_tag: str, local_version: str) -> bool:
 def fetch_latest(timeout: int = 6) -> dict | None:
     """
     Call GitHub Releases API.
-    Returns {"tag": str, "url": str} when the latest release contains
-    BlacksmithWidget.exe, or None on any error (no internet, private repo, etc.).
+    Returns {"tag": str, "url": str, "page_url": str, "notes": str} when the
+    latest release contains BlacksmithWidget.exe, or None on any error.
+      url      — 直連下載 URL（browser_download_url）
+      page_url — GitHub release 頁面 URL（html_url），供瀏覽器手動下載用
     """
     try:
         req = urllib.request.Request(_API_URL, headers=_HEADERS)
@@ -62,12 +64,17 @@ def fetch_latest(timeout: int = 6) -> dict | None:
             )
         with resp_ctx as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        tag   = data.get("tag_name", "")
-        notes = data.get("body", "")       # release notes (Markdown)
+        tag      = data.get("tag_name", "")
+        notes    = data.get("body", "")        # release notes (Markdown)
+        page_url = data.get("html_url", "")    # GitHub release 頁面
         for asset in data.get("assets", []):
             if asset.get("name") == _ASSET_NAME:
-                return {"tag": tag, "url": asset["browser_download_url"],
-                        "notes": notes}
+                return {
+                    "tag":      tag,
+                    "url":      asset["browser_download_url"],
+                    "page_url": page_url,
+                    "notes":    notes,
+                }
     except Exception:
         pass
     return None
