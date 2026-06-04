@@ -41,5 +41,4 @@ VERSION = "v0.5.x"   # 每次 b 或 c 遞增時同步更新這裡
 ## 3. 其他慣例
 
 - `Dev Tools` passphrase `0322` 只能以 `bytes([0x30,0x33,0x32,0x32])` 形式存在原始碼，絕對不能明文出現在 commit message、log 或任何文字說明
-- KK 的錯字對話是彩蛋，**不要修正**
 - `server_tool/` 伺服器相關檔案只在明確要求時操作
