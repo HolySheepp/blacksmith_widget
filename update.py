@@ -11,6 +11,7 @@ import os
 import ssl
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 def _make_no_verify_ctx() -> ssl.SSLContext:
@@ -62,7 +63,14 @@ def fetch_latest(timeout: int = 6) -> dict | None:
         # 先嘗試正常 SSL；若失敗（公司 Proxy SSL 檢查）才退回停用驗證
         try:
             resp_ctx = urllib.request.urlopen(req, timeout=timeout)
-        except ssl.SSLError:
+        except (ssl.SSLError, urllib.error.URLError) as _e:
+            # ssl.SSLError       — 直接的 SSL 驗證失敗（少數環境）
+            # urllib.error.URLError(reason=ssl.SSLError) — urllib 包裝後的代理 SSL 失敗（多數環境）
+            # 兩者都 fallback 到停用驗證；其他 URLError（連線逾時等）照常讓外層 except 處理
+            _ssl_wrapped = (isinstance(_e, urllib.error.URLError)
+                            and isinstance(_e.reason, ssl.SSLError))
+            if not (isinstance(_e, ssl.SSLError) or _ssl_wrapped):
+                raise
             resp_ctx = urllib.request.urlopen(
                 urllib.request.Request(_API_URL, headers=_HEADERS),
                 timeout=timeout,

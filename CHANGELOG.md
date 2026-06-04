@@ -1,5 +1,12 @@
 # CHANGELOG — 鐵砧桌面放置遊戲
 
+## v0.5.6
+
+### 🔧 修復
+- 修復在公司代理（Proxy）環境下自動更新版本查詢失敗的問題（`URLError` wrapping `ssl.SSLError` 未被 fallback 捕捉）
+
+---
+
 ## v0.5.5
 
 ### 🌐 多人模式 — 新功能
