@@ -38,7 +38,21 @@ VERSION = "v0.5.x"   # 每次 b 或 c 遞增時同步更新這裡
 
 ---
 
-## 3. 其他慣例
+## 3. CHANGELOG 維護
+
+每次 commit **同時**更新 `CHANGELOG.md`（專案根目錄），在對應版本區塊追加該次修改的重點（1-3 行即可）。  
+若該版本區塊尚未存在，在檔案最前面新增：
+
+```markdown
+## vX.Y.Z
+- 修改內容
+```
+
+Release 時直接複製對應版本區塊貼到 GitHub Release description 欄位。
+
+---
+
+## 4. 其他慣例
 
 - `Dev Tools` passphrase `0322` 只能以 `bytes([0x30,0x33,0x32,0x32])` 形式存在原始碼，絕對不能明文出現在 commit message、log 或任何文字說明
 - `server_tool/` 伺服器相關檔案只在明確要求時操作
