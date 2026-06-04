@@ -13,13 +13,14 @@ import subprocess
 import sys
 import urllib.request
 
-# 公司網路常以自有 CA 憑證做 SSL 流量檢查（中間人代理）。
-# PyInstaller 內建的 Python/OpenSSL 不讀 Windows 憑證庫，
-# 導致憑證驗證失敗。版本檢測只讀版本號，無敏感資料，
-# 停用驗證是合理的折衷。
-_SSL_CTX = ssl.create_default_context()
-_SSL_CTX.check_hostname = False
-_SSL_CTX.verify_mode    = ssl.CERT_NONE
+def _make_no_verify_ctx() -> ssl.SSLContext:
+    """停用憑證驗證的 SSL context，僅用於版本號查詢（低風險）。
+    公司 Proxy 的 SSL 中間人檢查會導致 PyInstaller 內建 OpenSSL 驗證失敗，
+    版本查詢只讀字串，可接受此折衷。下載 exe 不使用此 context。"""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode    = ssl.CERT_NONE
+    return ctx
 
 _API_URL    = "https://api.github.com/repos/HolySheepp/blacksmith_widget/releases/latest"
 _ASSET_NAME = "BlacksmithWidget.exe"
@@ -50,7 +51,16 @@ def fetch_latest(timeout: int = 6) -> dict | None:
     """
     try:
         req = urllib.request.Request(_API_URL, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
+        # 先嘗試正常 SSL；若失敗（公司 Proxy SSL 檢查）才退回停用驗證
+        try:
+            resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+        except ssl.SSLError:
+            resp_ctx = urllib.request.urlopen(
+                urllib.request.Request(_API_URL, headers=_HEADERS),
+                timeout=timeout,
+                context=_make_no_verify_ctx(),
+            )
+        with resp_ctx as resp:
             data = json.loads(resp.read().decode("utf-8"))
         tag   = data.get("tag_name", "")
         notes = data.get("body", "")       # release notes (Markdown)
@@ -71,8 +81,10 @@ def download_exe(url: str, dest: str, progress_cb=None) -> bool:
     Returns True on success.
     """
     try:
+        # 下載 exe：保留 SSL 驗證，不接受憑證錯誤
+        # 若 SSL 驗證失敗，寧可讓下載失敗也不冒險安裝來源不明的檔案
         req = urllib.request.Request(url, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=30, context=_SSL_CTX) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             total = int(resp.headers.get("Content-Length") or 0)
             done  = 0
             with open(dest, "wb") as f:
