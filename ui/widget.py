@@ -68,6 +68,7 @@ class BlacksmithWidget(QWidget):
     _check_msg             = pyqtSignal(str, str)        # (title, body) info message
     _clear_pending         = pyqtSignal()                # clears _pending_update on main thread
     _prompt_update_requested = pyqtSignal()              # 背景執行緒通知主執行緒顯示更新對話框
+    _update_api_failed     = pyqtSignal()                # API 無法連線，通知主執行緒顯示手動下載對話框
 
     def __init__(self):
         _wlog("[init] super().__init__()")
@@ -208,6 +209,7 @@ class BlacksmithWidget(QWidget):
         self._check_msg.connect(lambda t, b: QMessageBox.information(self, t, b))
         self._clear_pending.connect(lambda: setattr(self, '_pending_update', None))
         self._prompt_update_requested.connect(self._prompt_and_update)
+        self._update_api_failed.connect(self._show_update_api_failed_dialog)
 
         # ── Pre-create native HWND ─────────────────────────────────────────────
         # Qt uses lazy HWND creation: the native window is created on the first
@@ -872,13 +874,50 @@ class BlacksmithWidget(QWidget):
                 self._update_dlg_lbl = None
             self._show_dl_failed_dialog()
 
+    def _show_update_api_failed_dialog(self):
+        """手動點擊「檢查更新」但 API 無法連線時，提供瀏覽器開啟 releases 頁面的按鈕。"""
+        import webbrowser
+        import update as upd
+        from PyQt5.QtWidgets import QDialogButtonBox
+
+        page_url = upd.releases_page()
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("檢查更新")
+        dlg.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+        dlg.setMinimumWidth(360)
+
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(14, 12, 14, 14)
+        lay.setSpacing(10)
+
+        msg = QLabel(
+            "無法連線至更新伺服器。\n\n"
+            "可能原因：公司網路限制、無網路連線。\n\n"
+            "點擊下方按鈕可用瀏覽器開啟 GitHub releases 頁面，\n"
+            "手動查看並下載最新版本。"
+        )
+        msg.setWordWrap(True)
+        lay.addWidget(msg)
+
+        buttons = QDialogButtonBox()
+        btn_open = buttons.addButton("🌐  開啟 GitHub 下載頁面", QDialogButtonBox.AcceptRole)
+        btn_open.clicked.connect(lambda: webbrowser.open(page_url))
+        btn_close = buttons.addButton("關閉", QDialogButtonBox.RejectRole)
+        btn_close.clicked.connect(dlg.reject)
+        lay.addWidget(buttons)
+
+        dlg.exec_()
+
     def _show_dl_failed_dialog(self):
         """下載失敗時顯示對話框，提供在瀏覽器手動下載的按鈕。"""
         import webbrowser
+        import update as upd
         from PyQt5.QtWidgets import QDialogButtonBox
 
         pu = self._pending_update  # {"tag", "url", "page_url", "notes"}
-        page_url = (pu.get("page_url", "") or pu.get("url", "")) if pu else ""
+        # page_url 優先用 API 回傳值，API 失敗時 fallback 到硬編碼的 releases 頁面
+        page_url = (pu.get("page_url") if pu else None) or upd.releases_page()
         tag      = pu.get("tag", "") if pu else ""
 
         dlg = QDialog(self)
@@ -944,13 +983,8 @@ class BlacksmithWidget(QWidget):
             from PyQt5.QtCore import QMetaObject, Qt
             info = upd.fetch_latest(timeout=8)
             if info is None:
-                # 靜默失敗：公司網路常封鎖 GitHub API，不彈窗打擾玩家
-                # 僅在 tray tooltip 顯示提示，讓玩家知道檢查過但失敗了
-                self._check_msg.emit(
-                    "檢查更新",
-                    "無法連線至更新伺服器（可能是網路限制或無網路連線）。\n"
-                    "如需更新，請至 GitHub 手動下載最新版本。",
-                )
+                # API 無法連線 → 通知主執行緒顯示含「手動下載」按鈕的對話框
+                self._update_api_failed.emit()
             elif not upd.is_newer(info["tag"], VERSION):
                 # Already up-to-date — clear stale pending via signal (thread-safe)
                 self._clear_pending.emit()

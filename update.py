@@ -22,9 +22,10 @@ def _make_no_verify_ctx() -> ssl.SSLContext:
     ctx.verify_mode    = ssl.CERT_NONE
     return ctx
 
-_API_URL    = "https://api.github.com/repos/HolySheepp/blacksmith_widget/releases/latest"
-_ASSET_NAME = "BlacksmithWidget.exe"
-_HEADERS    = {"User-Agent": "BlacksmithWidget-Updater/1.0"}
+_API_URL       = "https://api.github.com/repos/HolySheepp/blacksmith_widget/releases/latest"
+_RELEASES_PAGE = "https://github.com/HolySheepp/blacksmith_widget/releases/latest"
+_ASSET_NAME    = "BlacksmithWidget.exe"
+_HEADERS       = {"User-Agent": "BlacksmithWidget-Updater/1.0"}
 
 
 # ── Version helpers ───────────────────────────────────────────────────────────
@@ -39,6 +40,11 @@ def _parse(tag: str) -> tuple:
 
 def is_newer(remote_tag: str, local_version: str) -> bool:
     return _parse(remote_tag) > _parse(local_version)
+
+
+def releases_page() -> str:
+    """永遠有效的 GitHub releases 頁面 URL，不依賴 API。"""
+    return _RELEASES_PAGE
 
 
 # ── Network ───────────────────────────────────────────────────────────────────
