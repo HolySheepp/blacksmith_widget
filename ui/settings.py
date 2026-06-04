@@ -283,7 +283,7 @@ class SettingsDialog(QDialog):
 
         # Art mode
         art_row = QHBoxLayout()
-        art_row.addWidget(QLabel("我是美術 (實驗):"))
+        art_row.addWidget(QLabel("美術相關功能:"))
         self.art_mode_cb = QCheckBox()
         self.art_mode_cb.setToolTip(
             "開啟後，在 PS / AI / AE / PR / Figma / Canva 等設計軟體中\n"

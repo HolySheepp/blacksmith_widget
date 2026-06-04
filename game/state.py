@@ -186,7 +186,7 @@ class GameState:
         self.always_on_top:   bool = bool(_sv.get("always_on_top",   True))
 
         # ── Art mode (美術模式) ────────────────────────────────────────────
-        self.art_mode:           bool  = bool(_sv.get("art_mode",           False))
+        self.art_mode:           bool  = bool(_sv.get("art_mode",           True))
         self.art_drag_px:        int   = int(_sv.get("art_drag_px",         20))
         self.art_drag_max_cps:   float = float(_sv.get("art_drag_max_cps",  12.0))
         self.art_scroll_max_cps: float = float(_sv.get("art_scroll_max_cps", 16.0))
@@ -206,7 +206,7 @@ class GameState:
         self.mp_room_id:      str  = str(_sv.get("mp_room_id",      ""))
         self.mp_player_name:  str  = str(_sv.get("mp_player_name",  ""))
         self.mp_port:         int  = int(_sv.get("mp_port",         9527))
-        self.mp_lerp:         bool = bool(_sv.get("mp_lerp",        False))
+        self.mp_lerp:         bool = bool(_sv.get("mp_lerp",        True))
         # 每位玩家的 peer widget 偏好（位置、縮放、隱藏砧等），以玩家名稱為 key
         self.mp_peer_prefs:   dict = dict(_sv.get("mp_peer_prefs",  {}))
 
@@ -573,7 +573,7 @@ class GameState:
         self.combo_dot_idx  = -1
         self.turbo_line_idx = -1
         # Art mode
-        self.art_mode           = False
+        self.art_mode           = True
         self.art_drag_px        = 20
         self.art_drag_max_cps   = 12.0
         self.art_scroll_max_cps = 16.0
@@ -587,7 +587,7 @@ class GameState:
         self.mp_room_id      = ""
         self.mp_player_name  = ""
         self.mp_port         = 9527
-        self.mp_lerp         = False
+        self.mp_lerp         = True
         self.mp_peer_prefs   = {}
 
     # ─────────────────────────────────────────────────────────────────────────

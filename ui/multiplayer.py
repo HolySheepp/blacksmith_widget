@@ -81,8 +81,7 @@ class MultiplayerAdvancedDialog(QDialog):
 
         lerp_hint = QLabel(
             "⚠  補幀會用插值平滑對方的位置，\n"
-            "   但可能導致鎚子打擊感不真實（彈簧→緩慢滑行）。\n"
-            "   建議保持關閉。"
+            "   在高延遲環境下可讓對方鎚子動作更流暢。"
         )
         lerp_hint.setStyleSheet("color: gray; font-size: 11px;")
         lerp_hint.setWordWrap(True)

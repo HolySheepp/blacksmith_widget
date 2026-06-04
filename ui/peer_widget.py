@@ -12,6 +12,7 @@ PeerWidget — 在玩家螢幕上顯示其他玩家（peer）的遊戲狀態。
 """
 import math
 import random
+import time
 
 from PyQt5.QtWidgets import QWidget, QMenu, QAction
 from PyQt5.QtCore    import Qt, QTimer, QPoint, QRect, QRectF
@@ -214,13 +215,14 @@ class PeerDisplayState:
 
     def tick(self, delta_s: float):
         """每幀更新（sparks 衰減 + lerp）。"""
-        # 速度自適應 lerp：鎚子越快 → k 越高 → 收斂越快
-        #   靜止/慢速：k=12（平滑）
-        #   高速下砸（vcvy≈480）：k≈72（幾乎即時）
-        # 解決連打/fever 模式鎚子跟不上而停滯的問題
+        # 速度自適應 lerp：同時參考「目前顯示速度」與「目標速度」取大值
+        #   靜止/慢速：k=15（平滑）
+        #   中速：k 線性上升
+        #   高速（≥480）：k=150（1幀內收斂 ~91%）
+        # 同時用顯示速度讓 k 在鎚子加速過程中也能即時跟上
         if self.lerp_enabled:
-            v_abs = abs(self._tgt_vcvy)
-            k = 12.0 + min(v_abs / 8.0, 60.0)
+            v_abs = max(abs(self.vcvy), abs(self._tgt_vcvy))
+            k = 15.0 + min(v_abs / 4.0, 135.0)
             alpha = 1.0 - math.exp(-k * delta_s)
             self.vcx  += (self._tgt_vcx  - self.vcx)  * alpha
             self.vcy  += (self._tgt_vcy  - self.vcy)  * alpha
@@ -299,6 +301,7 @@ class PeerWidget(QWidget):
         self._hover_hide_timer.timeout.connect(self._on_hover_hide)
 
         # ── 遊戲迴圈 ──────────────────────────────────────────────────────
+        self._last_tick_ns: int = time.monotonic_ns()   # 真實 delta time 計時
         self._loop = QTimer(self)
         self._loop.setInterval(_LOOP_MS)
         self._loop.timeout.connect(self._tick)
@@ -319,7 +322,12 @@ class PeerWidget(QWidget):
     # ── 遊戲迴圈 ──────────────────────────────────────────────────────────────
 
     def _tick(self):
-        self._peer_state.tick(_LOOP_S)
+        # 使用真實 elapsed time 讓 lerp 與螢幕刷新率無關
+        now = time.monotonic_ns()
+        dt = (now - self._last_tick_ns) * 1e-9   # 秒
+        self._last_tick_ns = now
+        dt = min(dt, 0.1)   # 最多 100ms，避免視窗最小化後暴衝
+        self._peer_state.tick(dt)
         # ghost guide：僅在本地隱藏鐵砧時才顯示虛線指示器
         if self._peer_state.hide_anvil:
             self._peer_state.mouse_on_widget = self._hovered
