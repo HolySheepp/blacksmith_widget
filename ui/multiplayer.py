@@ -4,35 +4,191 @@ MultiplayerDialog — 多人模式非模態對話框。
 """
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QRegExp
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QListWidget, QListWidgetItem,
-    QFrame, QSizePolicy, QWidget,
+    QFrame, QCheckBox, QSizePolicy, QWidget,
 )
-from PyQt5.QtGui import QRegExpValidator
-from PyQt5.QtCore import QRegExp
+from PyQt5.QtGui import QRegExpValidator, QIntValidator
 
+
+# ── 進階設定對話框 ─────────────────────────────────────────────────────────────
+
+class MultiplayerAdvancedDialog(QDialog):
+    """多人模式進階設定：伺服器 IP、Port、連線按鈕、lerp 補幀。"""
+
+    def __init__(self, network_client, state, lerp_changed_cb, parent=None):
+        super().__init__(parent)
+        self._client = network_client
+        self._state  = state
+        self._lerp_cb = lerp_changed_cb  # callback(bool) 當 lerp 切換時通知 widget.py
+
+        self.setWindowTitle("多人模式進階設定")
+        self.setWindowFlags(Qt.Dialog)
+        self.setMinimumWidth(360)
+        self._build_ui()
+        self._connect_signals()
+
+    # ── Build ─────────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.setContentsMargins(12, 12, 12, 12)
+
+        # ── 連線設定 ──────────────────────────────────────────────────────────
+        conn_box = QGroupBox("連線設定")
+        conn_lay = QVBoxLayout(conn_box)
+        conn_lay.setSpacing(6)
+
+        ip_row = QHBoxLayout()
+        ip_row.addWidget(QLabel("伺服器 IP："))
+        self._ip_edit = QLineEdit()
+        self._ip_edit.setPlaceholderText("172.20.39.180")
+        ip_row.addWidget(self._ip_edit)
+        conn_lay.addLayout(ip_row)
+
+        port_row = QHBoxLayout()
+        port_row.addWidget(QLabel("Port："))
+        self._port_edit = QLineEdit()
+        self._port_edit.setValidator(QIntValidator(1, 65535, self._port_edit))
+        self._port_edit.setFixedWidth(70)
+        port_row.addWidget(self._port_edit)
+        port_row.addStretch()
+        conn_lay.addLayout(port_row)
+
+        self._adv_conn_btn = QPushButton("連線")
+        self._adv_conn_btn.clicked.connect(self._on_adv_conn_clicked)
+        conn_lay.addWidget(self._adv_conn_btn)
+
+        # 連線狀態提示
+        self._adv_status_lbl = QLabel("")
+        self._adv_status_lbl.setStyleSheet("color: red;")
+        self._adv_status_lbl.setWordWrap(True)
+        self._adv_status_lbl.hide()
+        conn_lay.addWidget(self._adv_status_lbl)
+
+        root.addWidget(conn_box)
+
+        # ── 動畫設定 ──────────────────────────────────────────────────────────
+        anim_box = QGroupBox("動畫設定")
+        anim_lay = QVBoxLayout(anim_box)
+        anim_lay.setSpacing(4)
+
+        self._lerp_chk = QCheckBox("啟用多人動畫補幀（lerp）")
+        anim_lay.addWidget(self._lerp_chk)
+
+        lerp_hint = QLabel(
+            "⚠  補幀會用插值平滑對方的位置，\n"
+            "   但可能導致鎚子打擊感不真實（彈簧→緩慢滑行）。\n"
+            "   建議保持關閉。"
+        )
+        lerp_hint.setStyleSheet("color: gray; font-size: 11px;")
+        lerp_hint.setWordWrap(True)
+        anim_lay.addWidget(lerp_hint)
+
+        root.addWidget(anim_box)
+
+        # ── 關閉按鈕 ──────────────────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        root.addWidget(sep)
+
+        close_btn = QPushButton("關閉")
+        close_btn.clicked.connect(self.close)
+        root.addWidget(close_btn)
+
+        # ── 填入預存值 ────────────────────────────────────────────────────────
+        if self._state:
+            if self._state.mp_server_host:
+                self._ip_edit.setText(self._state.mp_server_host)
+            self._port_edit.setText(str(self._state.mp_port))
+            self._lerp_chk.setChecked(self._state.mp_lerp)
+
+        self._refresh_adv_btn()
+
+    def _connect_signals(self):
+        self._lerp_chk.toggled.connect(self._on_lerp_toggled)
+        self._client.connected.connect(self._refresh_adv_btn)
+        self._client.disconnected.connect(self._refresh_adv_btn)
+        self._client.conn_error.connect(self._on_adv_conn_error)
+
+    def _refresh_adv_btn(self, *_):
+        if self._client.is_connected:
+            self._adv_conn_btn.setText("斷線")
+        else:
+            self._adv_conn_btn.setText("連線")
+
+    def _on_adv_conn_clicked(self):
+        if self._client.is_connected:
+            self._client.disconnect()
+            return
+        ip   = self._ip_edit.text().strip()
+        port_txt = self._port_edit.text().strip()
+        if not ip:
+            self._show_adv_status("請輸入伺服器 IP")
+            return
+        port = int(port_txt) if port_txt.isdigit() else 9527
+        # 儲存到 state
+        if self._state:
+            self._state.mp_server_host = ip
+            self._state.mp_port        = port
+        self._hide_adv_status()
+        self._adv_conn_btn.setEnabled(False)
+        self._client.connect_to_server(ip, port)
+
+    def _on_adv_conn_error(self, msg: str):
+        self._adv_conn_btn.setEnabled(True)
+        self._show_adv_status(msg)
+
+    def _on_lerp_toggled(self, enabled: bool):
+        if self._state:
+            self._state.mp_lerp = enabled
+        if self._lerp_cb:
+            self._lerp_cb(enabled)
+
+    def _show_adv_status(self, msg: str):
+        self._adv_status_lbl.setText(msg)
+        self._adv_status_lbl.show()
+
+    def _hide_adv_status(self):
+        self._adv_status_lbl.hide()
+        self._adv_status_lbl.setText("")
+
+    def closeEvent(self, event):
+        try:
+            self._client.connected.disconnect(self._refresh_adv_btn)
+            self._client.disconnected.disconnect(self._refresh_adv_btn)
+            self._client.conn_error.disconnect(self._on_adv_conn_error)
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+
+# ── 主對話框 ───────────────────────────────────────────────────────────────────
 
 class MultiplayerDialog(QDialog):
 
     _DEFAULT_IP = "172.20.39.180"
 
-    def __init__(self, network_client, state=None, parent=None):
+    def __init__(self, network_client, state=None, lerp_changed_cb=None, parent=None):
         super().__init__(parent)
         self._client = network_client
-        self._state  = state          # GameState，用於讀寫 mp_* 欄位
+        self._state  = state
+        self._lerp_changed_cb = lerp_changed_cb  # callback(bool)
         self._in_room = False
-        self._pending_rejoin_after_connect = False  # 連線成功後執行重加入
-        self._auto_create_on_not_found = False      # join 失敗時自動 create
+        self._pending_rejoin_after_connect = False
+        self._auto_create_on_not_found = False
+        self._adv_dialog: MultiplayerAdvancedDialog | None = None
 
         self.setWindowTitle("多人模式")
-        self.setWindowFlags(Qt.Dialog)          # 非模態（show() 呼叫者負責）
+        self.setWindowFlags(Qt.Dialog)
         self.setMinimumWidth(380)
         self._build_ui()
         self._connect_signals()
         self._refresh_connection_state()
-        # 開啟時自動執行智能啟動流程（連線 → 加入/創建房間）
         self._run_startup_sequence()
 
     # ── Build ─────────────────────────────────────────────────────────────────
@@ -61,15 +217,6 @@ class MultiplayerDialog(QDialog):
         sep.setFrameShadow(QFrame.Sunken)
         root.addWidget(sep)
 
-        # ── 預先建立 IP 欄位（_build_panel_a 需要填入預設值）────────────────
-        self._ip_edit = QLineEdit()
-        self._ip_edit.setPlaceholderText(self._DEFAULT_IP)
-        self._ip_edit.setFixedWidth(130)
-
-        self._conn_btn = QPushButton("連線")
-        self._conn_btn.setFixedWidth(54)
-        self._conn_btn.clicked.connect(self._on_conn_btn_clicked)
-
         # ── 合作 GroupBox ─────────────────────────────────────────────────────
         coop_box = QGroupBox("合作")
         self._coop_layout = QVBoxLayout()
@@ -77,11 +224,9 @@ class MultiplayerDialog(QDialog):
         coop_box.setLayout(self._coop_layout)
         root.addWidget(coop_box)
 
-        # 狀態 A（不在房間）
         self._panel_a = self._build_panel_a()
         self._coop_layout.addWidget(self._panel_a)
 
-        # 狀態 B（在房間中）
         self._panel_b = self._build_panel_b()
         self._coop_layout.addWidget(self._panel_b)
         self._panel_b.hide()
@@ -97,19 +242,24 @@ class MultiplayerDialog(QDialog):
         rival_box.setLayout(rival_lay)
         root.addWidget(rival_box)
 
-        # ── 連線區（移至最下方，一般情況不需改動）──────────────────────────
+        # ── 底部按鈕列 ────────────────────────────────────────────────────────
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setFrameShadow(QFrame.Sunken)
         root.addWidget(sep2)
 
-        conn_row = QHBoxLayout()
-        conn_lbl = QLabel("伺服器 IP（一般情況不用改動）：")
-        conn_lbl.setStyleSheet("color: gray; font-size: 11px;")
-        conn_row.addWidget(conn_lbl)
-        conn_row.addWidget(self._ip_edit)
-        conn_row.addWidget(self._conn_btn)
-        root.addLayout(conn_row)
+        bottom_row = QHBoxLayout()
+
+        self._reconnect_btn = QPushButton("連線到伺服器")
+        self._reconnect_btn.clicked.connect(self._on_reconnect_btn_clicked)
+        bottom_row.addWidget(self._reconnect_btn, stretch=1)
+
+        adv_btn = QPushButton("⚙  進階設定...")
+        adv_btn.setFixedWidth(110)
+        adv_btn.clicked.connect(self._open_advanced)
+        bottom_row.addWidget(adv_btn)
+
+        root.addLayout(bottom_row)
 
     def _build_panel_a(self) -> QFrame:
         frame = QFrame()
@@ -117,7 +267,6 @@ class MultiplayerDialog(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # 玩家名稱
         name_row = QHBoxLayout()
         name_row.addWidget(QLabel("玩家名稱："))
         self._name_edit = QLineEdit()
@@ -126,7 +275,6 @@ class MultiplayerDialog(QDialog):
         name_row.addWidget(self._name_edit)
         lay.addLayout(name_row)
 
-        # 房間號碼
         room_row = QHBoxLayout()
         room_row.addWidget(QLabel("房間號碼："))
         self._room_edit = QLineEdit()
@@ -136,7 +284,6 @@ class MultiplayerDialog(QDialog):
         room_row.addWidget(self._room_edit)
         lay.addLayout(room_row)
 
-        # 按鈕列
         btn_row = QHBoxLayout()
         self._create_btn = QPushButton("創建房間")
         self._join_btn   = QPushButton("加入房間")
@@ -148,15 +295,13 @@ class MultiplayerDialog(QDialog):
         btn_row.addStretch()
         lay.addLayout(btn_row)
 
-        # 狀態文字（錯誤訊息）
         self._status_lbl = QLabel("")
         self._status_lbl.setStyleSheet("color: red;")
         self._status_lbl.setWordWrap(True)
         self._status_lbl.hide()
         lay.addWidget(self._status_lbl)
 
-        # ── 上次記錄 ─────────────────────────────────────────────────────────────
-        # 顯示條件：有 state.mp_room_id 且不在房間中
+        # 上次記錄區塊
         self._saved_info_frame = QFrame()
         saved_lay = QVBoxLayout(self._saved_info_frame)
         saved_lay.setContentsMargins(0, 4, 0, 0)
@@ -173,20 +318,14 @@ class MultiplayerDialog(QDialog):
         discard_row.addWidget(self._discard_btn)
         saved_lay.addLayout(discard_row)
 
-        # 預設隱藏整個 frame，之後由 _update_saved_info_ui 控制
         self._saved_info_frame.hide()
         lay.addWidget(self._saved_info_frame)
 
-        # 若有上次記錄，預先填入欄位
+        # 預填
         if self._state and self._state.mp_player_name:
             self._name_edit.setText(self._state.mp_player_name)
         if self._state and self._state.mp_room_id:
             self._room_edit.setText(self._state.mp_room_id)
-        # IP：優先用記錄，其次用預設 IP
-        if self._state and self._state.mp_server_host:
-            self._ip_edit.setText(self._state.mp_server_host)
-        else:
-            self._ip_edit.setText(self._DEFAULT_IP)
 
         return frame
 
@@ -196,12 +335,10 @@ class MultiplayerDialog(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # 房間資訊列
         self._room_info_lbl = QLabel("房間 - · 0/8 人")
         self._room_info_lbl.setStyleSheet("font-weight: bold;")
         lay.addWidget(self._room_info_lbl)
 
-        # 玩家列表
         self._player_list = QListWidget()
         self._player_list.setSelectionMode(QListWidget.SingleSelection)
         self._player_list.setSortingEnabled(False)
@@ -210,13 +347,11 @@ class MultiplayerDialog(QDialog):
         self._player_list.setFixedHeight(120)
         lay.addWidget(self._player_list)
 
-        # 踢除按鈕
         self._kick_btn = QPushButton("踢除選中玩家")
         self._kick_btn.clicked.connect(self._on_kick)
         self._kick_btn.hide()
         lay.addWidget(self._kick_btn)
 
-        # 退出房間
         self._leave_btn = QPushButton("退出房間")
         self._leave_btn.clicked.connect(self._on_leave_room)
         lay.addWidget(self._leave_btn)
@@ -241,7 +376,6 @@ class MultiplayerDialog(QDialog):
     # ── 指示燈 ────────────────────────────────────────────────────────────────
 
     def _set_light(self, color: str):
-        """color: 'green' | 'red' | 'yellow'"""
         colors = {
             "green":  ("#22c55e", "#16a34a"),
             "red":    ("#ef4444", "#b91c1c"),
@@ -260,15 +394,14 @@ class MultiplayerDialog(QDialog):
         self._join_btn.setEnabled(connected)
         if connected:
             self._set_light("green")
-            self._conn_btn.setText("斷線")
-            # 若已在房間中（重新開啟對話框），恢復 panel B
+            self._reconnect_btn.setText("斷線")
             if self._client.current_room and not self._in_room:
                 self._in_room = True
                 self._panel_b.show()
                 self._populate_player_list()
         else:
             self._set_light("red")
-            self._conn_btn.setText("連線")
+            self._reconnect_btn.setText("連線到伺服器")
 
     def _show_status(self, msg: str, color: str = "red"):
         self._status_lbl.setStyleSheet(f"color: {color};")
@@ -283,11 +416,11 @@ class MultiplayerDialog(QDialog):
         self._in_room = False
         self._panel_b.hide()
         self._panel_a.show()
-        self._update_saved_info_ui()   # 更新上次記錄區塊
+        self._update_saved_info_ui()
 
     def _switch_to_panel_b(self):
         self._in_room = True
-        self._panel_a.show()   # panel_a 的 status_lbl 仍隱藏
+        self._panel_a.show()
         self._hide_status()
         self._panel_b.show()
 
@@ -322,64 +455,60 @@ class MultiplayerDialog(QDialog):
         else:
             self._kick_btn.hide()
 
-    # ── Slots ─────────────────────────────────────────────────────────────────
-
     # ── 智能啟動流程 ──────────────────────────────────────────────────────────
 
     def _run_startup_sequence(self):
-        """對話框開啟時自動判斷連線/房間狀態並採取對應動作。
-
-        三種情況：
-        A. 已連線且在房間  → _refresh_connection_state 已處理，什麼都不做
-        B. 已連線但不在房間 → 嘗試重新加入/創建（由本 dialog 主導）
-        C. 連線中（auto-rejoin thread 執行中）→ 顯示黃燈等待，不重複嘗試連線
-           widget.py 的 _do_auto_rejoin 會處理房間加入，room_joined 信號觸發 Panel B
-        D. 未連線          → 啟動新連線，連線成功後由本 dialog 加入房間
-        """
         if self._client.is_connected:
             if not self._client.current_room:
-                # B: 已連線但不在房間
                 self._try_rejoin_or_create()
-            # else: A 已處理
         elif self._client.is_connecting:
-            # C: 已有連線進行中（widget auto-rejoin），等待即可
             self._set_light("yellow")
-            self._conn_btn.setEnabled(False)
-            # _pending_rejoin_after_connect 保持 False：
-            # 讓 widget._do_auto_rejoin 主導房間加入，dialog 接收 room_joined 訊號
+            self._reconnect_btn.setEnabled(False)
         else:
-            # D: 未連線，由本 dialog 啟動連線
             target = (self._state.mp_server_host
                       if self._state and self._state.mp_server_host
                       else self._DEFAULT_IP)
-            self._ip_edit.setText(target)
+            port = (self._state.mp_port
+                    if self._state else 9527)
             self._pending_rejoin_after_connect = True
             self._set_light("yellow")
-            self._conn_btn.setEnabled(False)
-            self._client.connect_to_server(target)
+            self._reconnect_btn.setEnabled(False)
+            self._client.connect_to_server(target, port)
 
     def _try_rejoin_or_create(self):
-        """已連線但不在房間：嘗試加入，若房間不存在則自動創建。"""
         if not self._state or not self._state.mp_room_id:
-            return  # 沒有上次記錄，不自動動作
+            return
         self._auto_create_on_not_found = True
         self._client.set_name(self._state.mp_player_name)
         self._client.join_room(self._state.mp_room_id)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
-    def _on_conn_btn_clicked(self):
+    def _on_reconnect_btn_clicked(self):
+        """主對話框的連線/斷線按鈕：使用 state 中儲存的 IP/port。"""
         if self._client.is_connected:
             self._set_light("yellow")
             self._client.disconnect()
         else:
-            ip = self._ip_edit.text().strip()
-            if not ip:
-                self._show_status("請輸入伺服器 IP")
-                return
+            ip   = (self._state.mp_server_host
+                    if self._state and self._state.mp_server_host
+                    else self._DEFAULT_IP)
+            port = (self._state.mp_port if self._state else 9527)
             self._set_light("yellow")
-            self._conn_btn.setEnabled(False)
-            self._client.connect_to_server(ip)
+            self._reconnect_btn.setEnabled(False)
+            self._client.connect_to_server(ip, port)
+
+    def _open_advanced(self):
+        if self._adv_dialog is not None and self._adv_dialog.isVisible():
+            self._adv_dialog.raise_()
+            self._adv_dialog.activateWindow()
+            return
+        self._adv_dialog = MultiplayerAdvancedDialog(
+            self._client, self._state,
+            lerp_changed_cb=self._lerp_changed_cb,
+            parent=self,
+        )
+        self._adv_dialog.show()
 
     def _on_create_room(self):
         name = self._name_edit.text().strip()
@@ -411,8 +540,7 @@ class MultiplayerDialog(QDialog):
         item = self._player_list.currentItem()
         if not item:
             return
-        # 從顯示文字取出名稱（去除前置空格與後綴括號內容）
-        raw = item.text().strip()
+        raw  = item.text().strip()
         name = raw.split("（")[0].strip()
         self._client.kick(name)
 
@@ -428,19 +556,18 @@ class MultiplayerDialog(QDialog):
 
     def _on_connected(self):
         self._set_light("green")
-        self._conn_btn.setText("斷線")
-        self._conn_btn.setEnabled(True)
+        self._reconnect_btn.setText("斷線")
+        self._reconnect_btn.setEnabled(True)
         self._create_btn.setEnabled(True)
         self._join_btn.setEnabled(True)
-        # 啟動序列觸發的連線 → 繼續嘗試加入/創建房間
         if self._pending_rejoin_after_connect:
             self._pending_rejoin_after_connect = False
             self._try_rejoin_or_create()
 
     def _on_disconnected(self, reason: str):
         self._set_light("red")
-        self._conn_btn.setText("連線")
-        self._conn_btn.setEnabled(True)
+        self._reconnect_btn.setText("連線到伺服器")
+        self._reconnect_btn.setEnabled(True)
         self._create_btn.setEnabled(False)
         self._join_btn.setEnabled(False)
         if self._in_room:
@@ -450,12 +577,11 @@ class MultiplayerDialog(QDialog):
 
     def _on_conn_error(self, msg: str):
         self._set_light("red")
-        self._conn_btn.setText("連線")
-        self._conn_btn.setEnabled(True)
+        self._reconnect_btn.setText("連線到伺服器")
+        self._reconnect_btn.setEnabled(True)
         self._show_status(msg)
 
     def _on_room_joined(self, room_id: str, players: list, host: str):
-        # 更新 state 的記錄（以防 multiplayer.py 是加入流程的發起者）
         if self._state and self._client.player_name:
             my_name = self._client.player_name
             self._state.mp_room_id     = room_id
@@ -466,7 +592,6 @@ class MultiplayerDialog(QDialog):
         self._populate_player_list()
 
     def _on_host_changed(self, new_host: str):
-        """房主轉移時更新玩家列表顯示。"""
         if self._in_room:
             self._populate_player_list()
 
@@ -485,7 +610,6 @@ class MultiplayerDialog(QDialog):
         self._show_status("你已被踢出房間")
 
     def _on_room_dissolved(self):
-        # 管理員強制解散房間時觸發
         self._switch_to_panel_a()
         self._show_status("房間已被解散")
 
@@ -496,7 +620,6 @@ class MultiplayerDialog(QDialog):
                 and self._state.mp_room_id
                 and self._client.is_connected
                 and not self._client.current_room):
-            # 自動重連時房間不存在 → 自動創建（成為新房主）
             self._auto_create_on_not_found = False
             self._client.create_room(self._state.mp_room_id)
         else:
@@ -504,14 +627,12 @@ class MultiplayerDialog(QDialog):
             self._show_status(msg)
 
     def _update_saved_info_ui(self):
-        """根據 state.mp_* 更新上次記錄區塊的顯示。"""
         if self._state is None or not self._state.mp_room_id:
             self._saved_info_frame.hide()
             return
         if self._in_room:
             self._saved_info_frame.hide()
             return
-        # 顯示記錄摘要 + 放棄按鈕
         self._saved_info_lbl.setText(
             f"📌 上次記錄：房間 {self._state.mp_room_id}"
             f"  |  名稱：{self._state.mp_player_name}"
@@ -519,7 +640,6 @@ class MultiplayerDialog(QDialog):
         self._saved_info_frame.show()
 
     def _on_discard_saved(self):
-        """放棄上次記錄，清除欄位。"""
         if self._state:
             self._state.mp_room_id     = ""
             self._state.mp_player_name = ""
@@ -532,8 +652,9 @@ class MultiplayerDialog(QDialog):
     # ── 對話框關閉 ────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
-        """關閉時斷開 signal 連接，避免下次開啟時重複接收。"""
         self._disconnect_signals()
+        if self._adv_dialog is not None:
+            self._adv_dialog.close()
         super().closeEvent(event)
 
     def _disconnect_signals(self):

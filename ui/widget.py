@@ -245,6 +245,14 @@ class BlacksmithWidget(QWidget):
         self._auto_rejoin_pending = False   # 啟動時等待自動重連的旗標
         self._rejoin_auto_create  = False   # ROOM_NOT_FOUND 時自動創建的旗標
 
+        # ── 自動重連系統（被迫斷線時）────────────────────────────────────────
+        self._was_in_room: bool    = False  # 是否曾在房間中（判斷是否被迫斷線）
+        self._auto_recon_active    = False
+        self._auto_recon_attempts  = 0
+        self._auto_recon_timer     = QTimer(self)
+        self._auto_recon_timer.setInterval(60_000)   # 60 秒一次
+        self._auto_recon_timer.timeout.connect(self._on_auto_recon_tick)
+
         # 自己的聊天氣泡（顯示在 widget 上方）
         self._own_bubble_text:  str   = ""
         self._own_bubble_alpha: float = 0.0
@@ -543,7 +551,9 @@ class BlacksmithWidget(QWidget):
             self._multi_dialog.raise_()
             self._multi_dialog.activateWindow()
             return
-        dlg = MultiplayerDialog(self._net_client, self.state, self)
+        dlg = MultiplayerDialog(self._net_client, self.state,
+                                lerp_changed_cb=self._on_lerp_changed,
+                                parent=self)
         self._multi_dialog = dlg
         self._place_dialog(dlg)
 
@@ -1165,6 +1175,9 @@ class BlacksmithWidget(QWidget):
         """成功加入或創建房間——為其他玩家建立 PeerWidget。"""
         # 清除自動創建旗標
         self._rejoin_auto_create = False
+        # 標記「曾在房間」並停止自動重連計時器
+        self._was_in_room = True
+        self._stop_auto_reconnect()
         # 儲存房間資訊以供下次啟動自動重連
         if self._net_client is not None:
             my_name = self._net_client.player_name or ""
@@ -1189,7 +1202,9 @@ class BlacksmithWidget(QWidget):
             pw.close()
 
     def _on_kicked_from_room(self):
-        # 被踢除，清除房間記錄
+        # 被踢除：主動（admin 行為），不觸發自動重連
+        self._was_in_room = False
+        self._stop_auto_reconnect()
         self.state.mp_room_id = ""
         self.state.mp_player_name = ""
         self.state.mp_server_host = ""
@@ -1197,11 +1212,16 @@ class BlacksmithWidget(QWidget):
         self._hide_chat_input()
 
     def _on_room_left(self):
-        """玩家主動退出房間時清理 peer widgets 和聊天輸入框。"""
+        """玩家主動退出房間：不觸發自動重連。"""
+        self._was_in_room = False
+        self._stop_auto_reconnect()
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
     def _on_room_dissolved(self):
+        # 管理員解散：不觸發自動重連
+        self._was_in_room = False
+        self._stop_auto_reconnect()
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
@@ -1224,6 +1244,7 @@ class BlacksmithWidget(QWidget):
         if not _MULTI_AVAILABLE:
             return
         pw = PeerWidget(player_name=name)
+        pw.set_lerp(self.state.mp_lerp)   # 繼承目前的 lerp 設定
         pw.show()
         self._peer_widgets[name] = pw
 
@@ -1238,10 +1259,13 @@ class BlacksmithWidget(QWidget):
             self._do_auto_rejoin()
 
     def _on_net_connection_dropped(self):
-        """WebSocket 意外中斷（重試前立即觸發）：立即關閉所有 peer widgets。
-        重連成功後 room_joined 信號會重新建立 peer widgets。"""
+        """WebSocket 意外中斷（重試前立即觸發）：立即關閉 peer widgets。
+        若玩家曾在房間，啟動自動重連系統（60s × 10 次）。"""
         self._close_all_peer_widgets()
         self._hide_chat_input()
+        # 只有「本來在房間且尚未啟動重連」才觸發
+        if self._was_in_room and not self._auto_recon_active:
+            self._start_auto_reconnect()
 
     def _on_server_notice(self, text: str):
         """伺服器廣播公告——以托盤氣泡通知顯示，讓玩家注意到。"""
@@ -1249,6 +1273,48 @@ class BlacksmithWidget(QWidget):
             self._tray.showMessage(
                 "📢  伺服器公告", text,
                 QSystemTrayIcon.Information, 10_000)
+
+    # ── 自動重連（被迫斷線） ──────────────────────────────────────────────────
+
+    def _start_auto_reconnect(self):
+        """啟動 60s 間隔、最多 10 次的自動重連，並以托盤氣泡通知用戶。"""
+        self._auto_recon_active   = True
+        self._auto_recon_attempts = 0
+        if self._tray is not None:
+            self._tray.showMessage(
+                "🔌  已掉線",
+                "伺服器關閉或在進行維護更新，將自動嘗試重新連接",
+                QSystemTrayIcon.Warning, 8_000)
+        self._auto_recon_timer.start()
+
+    def _stop_auto_reconnect(self):
+        """取消自動重連。"""
+        self._auto_recon_active = False
+        self._auto_recon_timer.stop()
+
+    def _on_auto_recon_tick(self):
+        """每 60 秒觸發：嘗試重連一次。"""
+        if self._auto_recon_attempts >= 10:
+            self._stop_auto_reconnect()
+            if self._tray is not None:
+                self._tray.showMessage(
+                    "❌  無法重新連接",
+                    "無法重新連接到伺服器，請聯繫一加",
+                    QSystemTrayIcon.Critical, 10_000)
+            return
+        self._auto_recon_attempts += 1
+        # 若已連線（之前快速重試成功但沒有進房間）→ 直接加入
+        if self._net_client and self._net_client.is_connected:
+            self._do_auto_rejoin()
+        else:
+            self._try_auto_rejoin()
+
+    # ── Lerp 回調 ─────────────────────────────────────────────────────────────
+
+    def _on_lerp_changed(self, enabled: bool):
+        """進階設定切換 lerp 時，即時更新所有現有 peer widgets。"""
+        for pw in self._peer_widgets.values():
+            pw.set_lerp(enabled)
 
     def _on_net_conn_error(self, _msg: str):
         """連線失敗（非重試斷線）——若為自動重連嘗試，顯示氣泡通知。"""
@@ -1282,7 +1348,10 @@ class BlacksmithWidget(QWidget):
         else:
             # 尚未連線，先連線（連線成功後 _on_net_connected 會自動呼叫 _do_auto_rejoin）
             self._auto_rejoin_pending = True
-            self._net_client.connect_to_server(self.state.mp_server_host)
+            self._net_client.connect_to_server(
+                self.state.mp_server_host,
+                self.state.mp_port,
+            )
 
     def _do_auto_rejoin(self):
         """連線後發送 set_name + join_room（靜默）。

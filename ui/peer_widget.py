@@ -53,6 +53,13 @@ class PeerDisplayState:
     繪製所需的欄位即可。"""
 
     def __init__(self, ui_scale: float = _BASE_SCALE):
+        # lerp 補幀 ──────────────────────────────────────────────────────────
+        self.lerp_enabled = False       # 由外部 set_lerp() 控制
+        self._tgt_vcx  = float(KB_X)   # lerp 目標（由每幀 frame 更新）
+        self._tgt_vcy  = float(KB_Y)
+        self._tgt_vcvx = 0.0
+        self._tgt_vcvy = 0.0
+
         # 動態（由 frame 更新）──────────────────────────────────────────────
         self.vcx = float(KB_X)
         self.vcy = float(KB_Y)
@@ -117,10 +124,21 @@ class PeerDisplayState:
     def update_from_frame(self, data: dict):
         """接收來自網路的 frame data，更新狀態。"""
         prev_hit = self.has_hit
-        self.vcx = float(data.get("vcx", self.vcx))
-        self.vcy = float(data.get("vcy", self.vcy))
-        self.vcvx = float(data.get("vcvx", 0.0))
-        self.vcvy = float(data.get("vcvy", 0.0))
+        new_vcx  = float(data.get("vcx",  self.vcx))
+        new_vcy  = float(data.get("vcy",  self.vcy))
+        new_vcvx = float(data.get("vcvx", 0.0))
+        new_vcvy = float(data.get("vcvy", 0.0))
+        if self.lerp_enabled:
+            # 儲存目標值；tick() 每幀用指數 lerp 趨近
+            self._tgt_vcx  = new_vcx
+            self._tgt_vcy  = new_vcy
+            self._tgt_vcvx = new_vcvx
+            self._tgt_vcvy = new_vcvy
+        else:
+            self.vcx  = new_vcx
+            self.vcy  = new_vcy
+            self.vcvx = new_vcvx
+            self.vcvy = new_vcvy
         self.has_hit = bool(data.get("has_hit", self.has_hit))
         self.anvil_glow = float(data.get("anvil_glow", self.anvil_glow))
         sc = data.get("strike_color")
@@ -188,7 +206,14 @@ class PeerDisplayState:
             )
 
     def tick(self, delta_s: float):
-        """每幀更新（sparks 衰減等）。"""
+        """每幀更新（sparks 衰減 + lerp）。"""
+        # 指數 lerp（framerate-independent）：k=8 → ~50ms 趨近 33%
+        if self.lerp_enabled:
+            alpha = 1.0 - math.exp(-8.0 * delta_s)
+            self.vcx  += (self._tgt_vcx  - self.vcx)  * alpha
+            self.vcy  += (self._tgt_vcy  - self.vcy)  * alpha
+            self.vcvx += (self._tgt_vcvx - self.vcvx) * alpha
+            self.vcvy += (self._tgt_vcvy - self.vcvy) * alpha
         alive = []
         for s in self.sparks:
             s.vy += 870 * delta_s
@@ -294,6 +319,15 @@ class PeerWidget(QWidget):
         if self._viewer_hide_anvil is not None:
             self._peer_state.hide_anvil = self._viewer_hide_anvil
         self.update()
+
+    def set_lerp(self, enabled: bool):
+        """切換 lerp 補幀；關閉時立即對齊目標值，避免殘留偏移。"""
+        self._peer_state.lerp_enabled = enabled
+        if not enabled:
+            self._peer_state.vcx  = self._peer_state._tgt_vcx
+            self._peer_state.vcy  = self._peer_state._tgt_vcy
+            self._peer_state.vcvx = self._peer_state._tgt_vcvx
+            self._peer_state.vcvy = self._peer_state._tgt_vcvy
 
     def show_bubble(self, text: str):
         """由 widget.py 在收到 chat 時呼叫。靜音時直接忽略。"""

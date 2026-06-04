@@ -104,7 +104,7 @@ class NetworkClient(QObject):
 
     # ── 連線 ──────────────────────────────────────────────────────────────────
 
-    def connect_to_server(self, host: str, port: int = 8080):
+    def connect_to_server(self, host: str, port: int = 9527):
         """從 Qt 主執行緒呼叫；在背景執行緒嘗試連線。"""
         if not _WS_AVAILABLE:
             self.conn_error.emit("請先安裝 websockets 套件：pip install websockets")

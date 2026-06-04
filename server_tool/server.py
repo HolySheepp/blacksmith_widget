@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QListWidget, QListWidgetItem, QGroupBox, QLabel, QGridLayout,
     QSplitter, QAction, QMessageBox, QLineEdit, QPushButton,
+    QDialog, QDialogButtonBox, QCheckBox, QIntValidator,
 )
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@ from PyQt5.QtWidgets import (
 # ---------------------------------------------------------------------------
 
 HOST = "0.0.0.0"
-PORT = 8080
+PORT = 9527
 MAX_ROOM_SIZE = 8
 MAX_NAME_LEN = 12
 PING_INTERVAL = 30.0      # 每 30 秒傳 ping
@@ -89,6 +90,7 @@ class _Bridge(QObject):
     state_changed = pyqtSignal()       # 玩家 / 房間清單有變動
     server_started = pyqtSignal()
     server_error = pyqtSignal(str)
+    server_stopped = pyqtSignal()
 
 
 bridge = _Bridge()
@@ -454,13 +456,16 @@ async def _handler(ws, *args):
 # ---------------------------------------------------------------------------
 
 class _ServerThread(threading.Thread):
-    def __init__(self):
+    def __init__(self, port):
         super().__init__(daemon=True)
+        self.port = port
         self.loop = asyncio.new_event_loop()
+        self._stop_fut = None
 
     def run(self):
         asyncio.set_event_loop(self.loop)
         try:
+            self._stop_fut = self.loop.create_future()
             self.loop.run_until_complete(self._serve())
         except Exception as e:
             bridge.server_error.emit(str(e))
@@ -469,9 +474,10 @@ class _ServerThread(threading.Thread):
         if websockets is None:
             bridge.server_error.emit("未安裝 websockets 套件")
             return
-        async with websockets.serve(self._handler, HOST, PORT):
+        async with websockets.serve(self._handler, HOST, self.port):
             bridge.server_started.emit()
-            await asyncio.Future()  # run forever
+            await self._stop_fut  # run until stop() is called
+        bridge.server_stopped.emit()
 
     async def _handler(self, ws, *args):
         await _handler(ws, *args)
@@ -479,6 +485,11 @@ class _ServerThread(threading.Thread):
     def schedule(self, coro):
         """從 Qt 執行緒呼叫 async 函式。"""
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+    def stop(self):
+        """從任意執行緒安全停止伺服器。"""
+        if self._stop_fut is not None and not self._stop_fut.done():
+            self.loop.call_soon_threadsafe(self._stop_fut.set_result, None)
 
 
 # ---------------------------------------------------------------------------
@@ -509,9 +520,11 @@ def disable_startup():
 # ---------------------------------------------------------------------------
 
 class MainWindow(QMainWindow):
-    def __init__(self, server):
+    def __init__(self):
         super().__init__()
-        self.server = server
+        self._port = PORT
+        self._server = None
+
         self.setWindowTitle("鐵砧伺服器 v1.0")
         self.resize(820, 600)
 
@@ -524,6 +537,7 @@ class MainWindow(QMainWindow):
         bridge.state_changed.connect(self._refresh_lists)
         bridge.server_started.connect(self._on_server_started)
         bridge.server_error.connect(self._on_server_error)
+        bridge.server_stopped.connect(self._on_server_stopped)
 
         # 每 1 秒刷新右側詳情與狀態列
         self._timer = QTimer(self)
@@ -533,6 +547,26 @@ class MainWindow(QMainWindow):
 
         self._refresh_lists()
         self._refresh_status()
+
+        # 自動啟動伺服器
+        self._start_server()
+
+    # ---- 伺服器管理 -------------------------------------------------------
+    def _start_server(self):
+        global rooms, clients, room_hosts
+        rooms.clear()
+        clients.clear()
+        room_hosts.clear()
+        self._server = _ServerThread(self._port)
+        self._server.start()
+        if hasattr(self, '_act_start'):
+            self._act_start.setEnabled(False)
+            self._act_stop.setEnabled(True)
+        self.statusBar().showMessage(f"正在啟動… port {self._port}")
+
+    def _stop_server(self):
+        if self._server:
+            self._server.stop()
 
     # ---- UI 建構 --------------------------------------------------------
     def _build_ui(self):
@@ -609,6 +643,19 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
 
         server_menu = menubar.addMenu("伺服器")
+
+        self._act_start = QAction("開啟伺服器", self)
+        self._act_start.setEnabled(False)  # 初始禁用，因為伺服器自動啟動
+        self._act_start.triggered.connect(self._start_server)
+        server_menu.addAction(self._act_start)
+
+        self._act_stop = QAction("關閉伺服器", self)
+        self._act_stop.setEnabled(True)
+        self._act_stop.triggered.connect(self._stop_server)
+        server_menu.addAction(self._act_stop)
+
+        server_menu.addSeparator()
+
         act_kick = QAction("強制斷線選中玩家", self)
         act_kick.triggered.connect(self._force_disconnect_selected)
         server_menu.addAction(act_kick)
@@ -617,11 +664,11 @@ class MainWindow(QMainWindow):
         act_dissolve.triggered.connect(self._dissolve_selected_room)
         server_menu.addAction(act_dissolve)
 
-        tools_menu = menubar.addMenu("工具")
-        self.act_startup = QAction("開機自啟", self, checkable=True)
-        self.act_startup.setChecked(startup_enabled())
-        self.act_startup.triggered.connect(self._toggle_startup)
-        tools_menu.addAction(self.act_startup)
+        server_menu.addSeparator()
+
+        act_settings = QAction("設定…", self)
+        act_settings.triggered.connect(self._open_settings)
+        server_menu.addAction(act_settings)
 
     # ---- 清單刷新 -------------------------------------------------------
     def _refresh_lists(self):
@@ -659,7 +706,7 @@ class MainWindow(QMainWindow):
     def _refresh_status(self):
         n = len(clients)
         self.statusBar().showMessage(
-            "正在監聽 port {} · {} 位玩家已連線".format(PORT, n)
+            "正在監聽 port {} · {} 位玩家已連線".format(self._port, n)
         )
 
     def _refresh_detail(self):
@@ -720,7 +767,7 @@ class MainWindow(QMainWindow):
                 await ws.close()
             except Exception:
                 pass
-        self.server.schedule(_close())
+        self._server.schedule(_close())
 
     def _dissolve_selected_room(self):
         room = self._selected_room()
@@ -738,7 +785,7 @@ class MainWindow(QMainWindow):
             rooms.pop(room, None)
             room_hosts.pop(room, None)
             _notify_state()
-        self.server.schedule(_dissolve())
+        self._server.schedule(_dissolve())
 
     def _on_room_double_clicked(self, item):
         """雙擊房間列表項目，顯示房間內玩家清單。"""
@@ -768,21 +815,92 @@ class MainWindow(QMainWindow):
             payload = {"type": "server_notice", "text": text}
             for info in list(clients.values()):
                 await _send(info.ws, payload)
-        self.server.schedule(_broadcast())
+        self._server.schedule(_broadcast())
 
-    def _toggle_startup(self, checked):
+    def _open_settings(self):
+        """開啟設定對話框。"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("設定")
+        dlg.setMinimumWidth(320)
+
+        layout = QVBoxLayout(dlg)
+
+        # Port 設定
+        port_row = QHBoxLayout()
+        port_row.addWidget(QLabel("Port："))
+        port_input = QLineEdit(str(self._port))
+        port_input.setValidator(QIntValidator(1, 65535, dlg))
+        port_row.addWidget(port_input)
+        layout.addLayout(port_row)
+
+        hint_label = QLabel("（更改 Port 需重啟伺服器才生效）")
+        hint_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(hint_label)
+
+        # 開機自啟核取方塊
+        startup_chk = QCheckBox("開機自啟")
+        startup_chk.setChecked(startup_enabled())
+        layout.addWidget(startup_chk)
+
+        # 確定 / 取消 按鈕
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            parent=dlg,
+        )
+        btn_box.button(QDialogButtonBox.Ok).setText("確定")
+        btn_box.button(QDialogButtonBox.Cancel).setText("取消")
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        layout.addWidget(btn_box)
+
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        # 套用設定
+        new_port_text = port_input.text().strip()
+        new_port = int(new_port_text) if new_port_text.isdigit() else self._port
+        port_changed = new_port != self._port
+
+        # 套用開機自啟
         try:
-            if checked:
+            if startup_chk.isChecked():
                 enable_startup()
             else:
                 disable_startup()
         except Exception as e:
             QMessageBox.warning(self, "開機自啟設定失敗", str(e))
-            self.act_startup.setChecked(startup_enabled())
+
+        # 套用 Port
+        self._port = new_port
+
+        if port_changed and self._server is not None:
+            reply = QMessageBox.question(
+                self,
+                "重啟伺服器",
+                f"Port 已更改為 {new_port}，是否立即重啟伺服器以套用？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                self._stop_server()
+                # 等待伺服器停止後再啟動（透過 server_stopped 訊號處理）
+                self._pending_restart = True
 
     # ---- 伺服器事件 -----------------------------------------------------
     def _on_server_started(self):
+        self._act_start.setEnabled(False)
+        self._act_stop.setEnabled(True)
         self._refresh_status()
+
+    def _on_server_stopped(self):
+        self.statusBar().showMessage("伺服器已停止")
+        self._act_start.setEnabled(True)
+        self._act_stop.setEnabled(False)
+        self._server = None
+        # 若有待重啟旗標，自動重新啟動
+        if getattr(self, '_pending_restart', False):
+            self._pending_restart = False
+            self._start_server()
 
     def _on_server_error(self, msg):
         self.statusBar().showMessage("伺服器錯誤：{}".format(msg))
@@ -796,10 +914,7 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
 
-    server = _ServerThread()
-    server.start()
-
-    win = MainWindow(server)
+    win = MainWindow()
     win.show()
 
     sys.exit(app.exec_())
