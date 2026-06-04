@@ -135,14 +135,12 @@ class PeerDisplayState:
             self._tgt_vcy  = new_vcy
             self._tgt_vcvx = new_vcvx
             self._tgt_vcvy = new_vcvy
-            # 打擊瞬間 soft-snap：補剩餘差距的 80%
-            # 速度自適應 lerp 讓鎚子下砸時 k 已很高，剩餘差距本來就小，
-            # soft-snap 只是最後一道保險，不會造成瞬移感
+            # 打擊確認：連打時網路幀的 vcy 可能已是彈起位置
+            # 強制顯示觸砧瞬間（MAX_VCY = FACE_TOP - HEAD_PERP）
+            # 下一幀 lerp 自動追回網路位置，呈現自然彈起
             if new_has_hit and not self.has_hit:
-                self.vcx  += (new_vcx  - self.vcx)  * 0.8
-                self.vcy  += (new_vcy  - self.vcy)  * 0.8
-                self.vcvx += (new_vcvx - self.vcvx) * 0.8
-                self.vcvy += (new_vcvy - self.vcvy) * 0.8
+                self.vcy  = float(MAX_VCY)
+                self.vcvy = new_vcvy   # 彈起速度讓後續動畫自然
         else:
             self.vcx  = new_vcx
             self.vcy  = new_vcy
@@ -293,6 +291,13 @@ class PeerWidget(QWidget):
         self._bubble_fade_timer.setInterval(_BUBBLE_FADE_MS)
         self._bubble_fade_timer.timeout.connect(self._fade_bubble_step)
 
+        # ── Hover 延遲消失（與自己 widget ghost guide 相同的 400ms）────────
+        # 控制名稱（未固定時）與 ghost guide 在滑鼠離開後延遲消失
+        self._hover_hide_timer = QTimer(self)
+        self._hover_hide_timer.setSingleShot(True)
+        self._hover_hide_timer.setInterval(400)
+        self._hover_hide_timer.timeout.connect(self._on_hover_hide)
+
         # ── 遊戲迴圈 ──────────────────────────────────────────────────────
         self._loop = QTimer(self)
         self._loop.setInterval(_LOOP_MS)
@@ -418,8 +423,8 @@ class PeerWidget(QWidget):
         text = self._player_name
         tw = fm.horizontalAdvance(text)
         cx = self.width() / 2
-        # 名稱貼近鐵砧底座下方（AY_BASE * ui_scale + 小偏移）
-        ty = int(AY_BASE * self._peer_state.ui_scale) + 14
+        # 名稱緊貼鐵砧底座（AY_BASE * ui_scale + 小偏移）
+        ty = int(AY_BASE * self._peer_state.ui_scale) + 11
 
         # 陰影提升可讀性
         painter.setPen(QPen(QColor(0, 0, 0, 160)))
@@ -542,14 +547,20 @@ class PeerWidget(QWidget):
             self._drag_offset  = None
 
     def enterEvent(self, event):
+        self._hover_hide_timer.stop()   # 取消待定的消失計時
         self._hovered = True
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
+        # 不立即消失——等 400ms 讓玩家有時間移回 widget（與 ghost guide 一致）
+        self._hover_hide_timer.start()
+        super().leaveEvent(event)
+
+    def _on_hover_hide(self):
+        """400ms hover 消失 timer 觸發：清除 hover 狀態，刷新畫面。"""
         self._hovered = False
         self.update()
-        super().leaveEvent(event)
 
     # ── 右鍵選單 ──────────────────────────────────────────────────────────────
 
@@ -630,4 +641,5 @@ class PeerWidget(QWidget):
         self._loop.stop()
         self._bubble_timer.stop()
         self._bubble_fade_timer.stop()
+        self._hover_hide_timer.stop()
         super().closeEvent(event)

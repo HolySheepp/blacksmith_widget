@@ -462,7 +462,7 @@ class BlacksmithWidget(QWidget):
         # Don't hide immediately — give the player 400 ms to reach the ghost circle.
         self._ghost_hide_timer.start()
         super().leaveEvent(event)
-        QTimer.singleShot(200, self._hide_chat_input)
+        QTimer.singleShot(400, self._hide_chat_input)
 
     def moveEvent(self, event):
         super().moveEvent(event)
@@ -474,15 +474,15 @@ class BlacksmithWidget(QWidget):
         if obj is self._chat_le:
             t = event.type()
             if t == QEvent.FocusOut:
-                # 失焦後延遲隱藏，讓使用者有時間移回 widget
-                QTimer.singleShot(200, self._hide_chat_input)
+                # 失焦後延遲隱藏，讓使用者有時間移回 widget（與 ghost guide 一致 400ms）
+                QTimer.singleShot(400, self._hide_chat_input)
             elif t == QEvent.Enter:
                 # 滑鼠進入輸入框：標記懸停，取消待定的隱藏
                 self._chat_input_hovered = True
             elif t == QEvent.Leave:
                 # 滑鼠離開輸入框：延遲隱藏
                 self._chat_input_hovered = False
-                QTimer.singleShot(200, self._hide_chat_input)
+                QTimer.singleShot(400, self._hide_chat_input)
         return super().eventFilter(obj, event)
 
     def _place_dialog(self, dlg):
