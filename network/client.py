@@ -174,7 +174,13 @@ class NetworkClient(QObject):
                     self._ws = None
                     self._connected_flag = False
 
-            # WebSocket 斷線（server 關閉 or 網路中斷）→ 立即通知 UI 清除 peer
+            # WebSocket 斷線 → 立即清除房間狀態（舊值殘留會讓 _do_auto_rejoin 誤判為仍在房間）
+            with self._lock:
+                self._current_room = None
+                self._room_players = []
+                self._room_host    = None
+
+            # 通知 UI 立即清除 peer widgets
             self.connection_dropped.emit()
 
             # 主動斷線：立刻結束，不重試，讓 UI 即時更新

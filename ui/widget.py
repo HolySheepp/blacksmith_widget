@@ -1282,8 +1282,10 @@ class BlacksmithWidget(QWidget):
         self._update_tray_center_text()
 
     def _on_net_connected(self):
-        """NetworkClient 連線成功時呼叫：若為自動重連，送出加入房間請求。"""
-        if self._auto_rejoin_pending:
+        """NetworkClient 連線成功時呼叫：若為自動重連，送出加入房間請求。
+        _auto_rejoin_pending：由 _try_auto_rejoin 設置（timer 觸發的慢速路徑）。
+        _auto_recon_active：client.py 在內部 retry 快速重連時也要立即進房間，不等下一個 tick。"""
+        if self._auto_rejoin_pending or self._auto_recon_active:
             self._do_auto_rejoin()
 
     def _on_net_connection_dropped(self):
