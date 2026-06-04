@@ -195,7 +195,14 @@ class PeerDisplayState:
         """打擊時在本地生成火花（不依賴網路傳輸的火花資料）。"""
         intensity = self.anvil_glow
         count = int((10 + intensity * 40))
-        sx, sy = float(AX), float(FACE_TOP)
+        sx = float(AX)
+        # 有金屬塊時，接觸面在金屬塊頂面（與 renderer._render_vcy_fast 邏輯一致）
+        m = self.current_metal
+        if (m is not None and not m.dead
+                and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
+            sy = float(FACE_TOP - m.thickness)
+        else:
+            sy = float(FACE_TOP)
         for _ in range(count):
             a = -math.pi + random.random() * math.pi
             spd = 60 + random.random() * 400 * (0.2 + intensity * 0.8)
@@ -215,19 +222,30 @@ class PeerDisplayState:
 
     def tick(self, delta_s: float):
         """每幀更新（sparks 衰減 + lerp）。"""
-        # 速度自適應 lerp：同時參考「目前顯示速度」與「目標速度」取大值
-        #   靜止/慢速：k=15（平滑）
-        #   中速：k 線性上升
-        #   高速（≥480）：k=150（1幀內收斂 ~91%）
-        # 同時用顯示速度讓 k 在鎚子加速過程中也能即時跟上
+        # 速度 + 位置誤差雙重自適應 lerp：
+        #   k_min = 15  （靜止/幾乎到位：超平滑）
+        #   k_max = 185 （高速 or 位置偏差大：接近 1 幀收斂 ~95%）
+        #
+        # 改進重點：
+        #   1. 加入位置誤差貢獻（pos_err_y）：位置跑太遠時自動加速追回
+        #   2. vcvx/vcvy 直接 snap 目標值（速度不影響渲染，lerp 只會讓 k 滯後）
+        #   3. 微小殘差直接 snap（消除 lerp 的永遠收斂微抖動）
         if self.lerp_enabled:
+            pos_err_y = abs(self._tgt_vcy - self.vcy)
             v_abs = max(abs(self.vcvy), abs(self._tgt_vcvy))
-            k = 15.0 + min(v_abs / 4.0, 135.0)
+            k = 15.0 + min(v_abs / 3.5 + pos_err_y * 0.4, 170.0)
             alpha = 1.0 - math.exp(-k * delta_s)
-            self.vcx  += (self._tgt_vcx  - self.vcx)  * alpha
-            self.vcy  += (self._tgt_vcy  - self.vcy)  * alpha
-            self.vcvx += (self._tgt_vcvx - self.vcvx) * alpha
-            self.vcvy += (self._tgt_vcvy - self.vcvy) * alpha
+            self.vcx += (self._tgt_vcx - self.vcx) * alpha
+            self.vcy += (self._tgt_vcy - self.vcy) * alpha
+            # 速度直接對齊目標：vcvx/vcvy 不影響渲染，直接 snap
+            # 讓下一幀的 k 正確反映網路速度，避免速度 lerp 滯後
+            self.vcvx = self._tgt_vcvx
+            self.vcvy = self._tgt_vcvy
+            # 極小殘差直接 snap，消除永遠收斂的微抖動
+            if abs(self._tgt_vcx - self.vcx) < 0.4:
+                self.vcx = self._tgt_vcx
+            if abs(self._tgt_vcy - self.vcy) < 0.4:
+                self.vcy = self._tgt_vcy
         alive = []
         for s in self.sparks:
             s.vy += 870 * delta_s
