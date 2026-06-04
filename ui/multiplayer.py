@@ -23,8 +23,8 @@ class MultiplayerDialog(QDialog):
         self._client = network_client
         self._state  = state          # GameState，用於讀寫 mp_* 欄位
         self._in_room = False
-        self._waiting_for_host = False  # True = ROOM_NOT_FOUND 後等待重試
         self._pending_rejoin_after_connect = False  # 連線成功後執行重加入
+        self._auto_create_on_not_found = False      # join 失敗時自動 create
 
         self.setWindowTitle("多人模式")
         self.setWindowFlags(Qt.Dialog)          # 非模態（show() 呼叫者負責）
@@ -166,22 +166,12 @@ class MultiplayerDialog(QDialog):
         self._saved_info_lbl.setStyleSheet("color: gray; font-size: 11px;")
         saved_lay.addWidget(self._saved_info_lbl)
 
-        # "等待房主" 訊息（ROOM_NOT_FOUND 後顯示）
-        self._host_waiting_lbl = QLabel("⏳ 房主還未開房間，請稍候再試")
-        self._host_waiting_lbl.setStyleSheet("color: #b45309;")   # 橙棕色
-        self._host_waiting_lbl.setWordWrap(True)
-        self._host_waiting_lbl.hide()
-        saved_lay.addWidget(self._host_waiting_lbl)
-
-        retry_row = QHBoxLayout()
-        self._retry_btn = QPushButton("重試加入")
-        self._retry_btn.clicked.connect(self._on_retry_join)
-        self._discard_btn = QPushButton("放棄此房間記錄")
+        discard_row = QHBoxLayout()
+        self._discard_btn = QPushButton("清除此記錄")
         self._discard_btn.clicked.connect(self._on_discard_saved)
-        retry_row.addStretch()
-        retry_row.addWidget(self._retry_btn)
-        retry_row.addWidget(self._discard_btn)
-        saved_lay.addLayout(retry_row)
+        discard_row.addStretch()
+        discard_row.addWidget(self._discard_btn)
+        saved_lay.addLayout(discard_row)
 
         # 預設隱藏整個 frame，之後由 _update_saved_info_ui 控制
         self._saved_info_frame.hide()
@@ -241,6 +231,7 @@ class MultiplayerDialog(QDialog):
         c.disconnected.connect(self._on_disconnected)
         c.conn_error.connect(self._on_conn_error)
         c.room_joined.connect(self._on_room_joined)
+        c.host_changed.connect(self._on_host_changed)
         c.player_joined.connect(self._on_player_joined)
         c.player_left.connect(self._on_player_left)
         c.kicked.connect(self._on_kicked)
@@ -368,17 +359,12 @@ class MultiplayerDialog(QDialog):
             self._client.connect_to_server(target)
 
     def _try_rejoin_or_create(self):
-        """已連線但不在房間：根據是否為房主決定創建或加入。"""
+        """已連線但不在房間：嘗試加入，若房間不存在則自動創建。"""
         if not self._state or not self._state.mp_room_id:
             return  # 沒有上次記錄，不自動動作
-        name = self._state.mp_player_name
-        room = self._state.mp_room_id
-        was_host = self._state.mp_was_host
-        self._client.set_name(name)
-        if was_host:
-            self._client.create_room(room)
-        else:
-            self._client.join_room(room)
+        self._auto_create_on_not_found = True
+        self._client.set_name(self._state.mp_player_name)
+        self._client.join_room(self._state.mp_room_id)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -436,8 +422,6 @@ class MultiplayerDialog(QDialog):
             self._state.mp_room_id     = ""
             self._state.mp_player_name = ""
             self._state.mp_server_host = ""
-            self._state.mp_was_host    = False
-        self._waiting_for_host = False
         self._switch_to_panel_a()
 
     # ── Signal handlers ───────────────────────────────────────────────────────
@@ -477,10 +461,14 @@ class MultiplayerDialog(QDialog):
             self._state.mp_room_id     = room_id
             self._state.mp_player_name = my_name
             self._state.mp_server_host = self._client.server_host
-            self._state.mp_was_host    = (my_name == host)
-        self._waiting_for_host = False
+        self._auto_create_on_not_found = False
         self._switch_to_panel_b()
         self._populate_player_list()
+
+    def _on_host_changed(self, new_host: str):
+        """房主轉移時更新玩家列表顯示。"""
+        if self._in_room:
+            self._populate_player_list()
 
     def _on_player_joined(self, name: str):
         self._populate_player_list()
@@ -493,63 +481,42 @@ class MultiplayerDialog(QDialog):
             self._state.mp_room_id     = ""
             self._state.mp_player_name = ""
             self._state.mp_server_host = ""
-            self._state.mp_was_host    = False
-        self._waiting_for_host = False
         self._switch_to_panel_a()
         self._show_status("你已被踢出房間")
 
     def _on_room_dissolved(self):
-        self._waiting_for_host = True   # 保留記錄，等房主重開
+        # 管理員強制解散房間時觸發
         self._switch_to_panel_a()
-        self._show_status("房間已解散，等待房主重新開房")
+        self._show_status("房間已被解散")
 
     def _on_server_error(self, code: str, msg: str):
         if (code == "ROOM_NOT_FOUND"
+                and self._auto_create_on_not_found
                 and self._state is not None
-                and self._state.mp_room_id):
-            # 重連時房間尚不存在 → 顯示等待訊息而非錯誤
-            self._waiting_for_host = True
-            self._update_saved_info_ui()
+                and self._state.mp_room_id
+                and self._client.is_connected
+                and not self._client.current_room):
+            # 自動重連時房間不存在 → 自動創建（成為新房主）
+            self._auto_create_on_not_found = False
+            self._client.create_room(self._state.mp_room_id)
         else:
-            self._waiting_for_host = False
+            self._auto_create_on_not_found = False
             self._show_status(msg)
 
     def _update_saved_info_ui(self):
         """根據 state.mp_* 更新上次記錄區塊的顯示。"""
         if self._state is None or not self._state.mp_room_id:
             self._saved_info_frame.hide()
-            self._waiting_for_host = False
             return
         if self._in_room:
             self._saved_info_frame.hide()
             return
-        # 顯示記錄摘要
+        # 顯示記錄摘要 + 放棄按鈕
         self._saved_info_lbl.setText(
             f"📌 上次記錄：房間 {self._state.mp_room_id}"
             f"  |  名稱：{self._state.mp_player_name}"
         )
         self._saved_info_frame.show()
-        # 控制「等待房主」子項目
-        if self._waiting_for_host:
-            self._host_waiting_lbl.show()
-            self._retry_btn.show()
-            self._discard_btn.show()
-        else:
-            self._host_waiting_lbl.hide()
-            self._retry_btn.hide()
-            self._discard_btn.hide()
-
-    def _on_retry_join(self):
-        """重試加入上次記錄的房間。"""
-        if not self._state or not self._state.mp_room_id:
-            return
-        if not self._client.is_connected:
-            self._show_status("尚未連線，請先連線至伺服器")
-            return
-        self._waiting_for_host = False
-        self._hide_status()
-        self._client.set_name(self._state.mp_player_name)
-        self._client.join_room(self._state.mp_room_id)
 
     def _on_discard_saved(self):
         """放棄上次記錄，清除欄位。"""
@@ -557,8 +524,6 @@ class MultiplayerDialog(QDialog):
             self._state.mp_room_id     = ""
             self._state.mp_player_name = ""
             self._state.mp_server_host = ""
-            self._state.mp_was_host    = False
-        self._waiting_for_host = False
         self._name_edit.clear()
         self._room_edit.clear()
         self._update_saved_info_ui()
@@ -578,6 +543,7 @@ class MultiplayerDialog(QDialog):
             (c.disconnected,   self._on_disconnected),
             (c.conn_error,     self._on_conn_error),
             (c.room_joined,    self._on_room_joined),
+            (c.host_changed,   self._on_host_changed),
             (c.player_joined,  self._on_player_joined),
             (c.player_left,    self._on_player_left),
             (c.kicked,         self._on_kicked),

@@ -241,6 +241,7 @@ class BlacksmithWidget(QWidget):
         self._peer_widgets: dict[str, PeerWidget]  = {}
         self._multi_dialog: MultiplayerDialog | None = None
         self._auto_rejoin_pending = False   # 啟動時等待自動重連的旗標
+        self._rejoin_auto_create  = False   # ROOM_NOT_FOUND 時自動創建的旗標
 
         # 自己的聊天氣泡（顯示在 widget 上方）
         self._own_bubble_text:  str   = ""
@@ -291,6 +292,7 @@ class BlacksmithWidget(QWidget):
             self._net_client.chat_received.connect(self._on_chat_received)
             self._net_client.connected.connect(self._on_net_connected)
             self._net_client.disconnected.connect(self._on_net_disconnected)
+            self._net_client.server_error.connect(self._on_net_server_error)
 
         _wlog("[init] __init__ complete")
 
@@ -1082,13 +1084,14 @@ class BlacksmithWidget(QWidget):
 
     def _on_room_joined(self, room_id: str, players: list, host: str):
         """成功加入或創建房間——為其他玩家建立 PeerWidget。"""
+        # 清除自動創建旗標
+        self._rejoin_auto_create = False
         # 儲存房間資訊以供下次啟動自動重連
         if self._net_client is not None:
             my_name = self._net_client.player_name or ""
             self.state.mp_room_id      = room_id
             self.state.mp_player_name  = my_name
             self.state.mp_server_host  = self._net_client.server_host
-            self.state.mp_was_host     = (my_name == host)
         # 關閉舊的 peer widgets（若有）
         self._close_all_peer_widgets()
         my_name = self._net_client.player_name if self._net_client else None
@@ -1111,13 +1114,11 @@ class BlacksmithWidget(QWidget):
         self.state.mp_room_id = ""
         self.state.mp_player_name = ""
         self.state.mp_server_host = ""
-        self.state.mp_was_host = False
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
     def _on_room_left(self):
         """玩家主動退出房間時清理 peer widgets 和聊天輸入框。"""
-        self.state.mp_was_host = False
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
@@ -1181,15 +1182,27 @@ class BlacksmithWidget(QWidget):
             self._net_client.connect_to_server(self.state.mp_server_host)
 
     def _do_auto_rejoin(self):
-        """連線後發送 set_name + join_room/create_room（靜默，失敗不顯示對話框）。"""
+        """連線後發送 set_name + join_room（靜默）。
+        若房間不存在（ROOM_NOT_FOUND）則 _on_net_server_error 自動 create_room。"""
         self._auto_rejoin_pending = False
         if self._net_client is None or self._net_client.current_room:
             return
         self._net_client.set_name(self.state.mp_player_name)
-        if self.state.mp_was_host:
+        self._rejoin_auto_create = True
+        self._net_client.join_room(self.state.mp_room_id)
+
+    def _on_net_server_error(self, code: str, _msg: str):
+        """伺服器錯誤：若自動重連時收到 ROOM_NOT_FOUND，自動創建房間。"""
+        if (code == "ROOM_NOT_FOUND"
+                and self._rejoin_auto_create
+                and self._net_client is not None
+                and self._net_client.is_connected
+                and not self._net_client.current_room
+                and self.state.mp_room_id):
+            self._rejoin_auto_create = False
             self._net_client.create_room(self.state.mp_room_id)
         else:
-            self._net_client.join_room(self.state.mp_room_id)
+            self._rejoin_auto_create = False
 
     def _reposition_chat_input(self):
         """把聊天輸入框定位在鐵砧面上方約 120px 處，寬度為 widget 一半，水平置中。"""

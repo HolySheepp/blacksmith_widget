@@ -205,7 +205,6 @@ class GameState:
         self.mp_server_host:  str  = str(_sv.get("mp_server_host",  ""))
         self.mp_room_id:      str  = str(_sv.get("mp_room_id",      ""))
         self.mp_player_name:  str  = str(_sv.get("mp_player_name",  ""))
-        self.mp_was_host:     bool = bool(_sv.get("mp_was_host",    False))
 
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
@@ -476,7 +475,6 @@ class GameState:
             "mp_server_host":          self.mp_server_host,
             "mp_room_id":              self.mp_room_id,
             "mp_player_name":          self.mp_player_name,
-            "mp_was_host":             self.mp_was_host,
         }
 
     def _metal_to_save(self) -> dict | None:
@@ -581,7 +579,6 @@ class GameState:
         self.mp_server_host  = ""
         self.mp_room_id      = ""
         self.mp_player_name  = ""
-        self.mp_was_host     = False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal

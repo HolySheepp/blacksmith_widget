@@ -40,6 +40,7 @@ class NetworkClient(QObject):
     conn_error     = pyqtSignal(str)          # 連線失敗（給 UI 顯示）
 
     room_joined    = pyqtSignal(str, list, str)  # (room_id, [player_names], host_name)
+    host_changed   = pyqtSignal(str)             # new_host_name（房主轉移）
     room_left      = pyqtSignal()                # 自己主動離開房間
     player_joined  = pyqtSignal(str)             # player_name
     player_left    = pyqtSignal(str)             # player_name
@@ -216,6 +217,11 @@ class NetworkClient(QObject):
             if name in self._room_players:
                 self._room_players.remove(name)
             self.player_left.emit(name)
+
+        elif t == "host_changed":
+            new_host = msg.get("host", "")
+            self._room_host = new_host
+            self.host_changed.emit(new_host)
 
         elif t == "kicked":
             self._current_room = None
