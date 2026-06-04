@@ -135,12 +135,14 @@ class PeerDisplayState:
             self._tgt_vcy  = new_vcy
             self._tgt_vcvx = new_vcvx
             self._tgt_vcvy = new_vcvy
-            # 打擊瞬間強制 snap：避免 lerp 延遲導致鎚子視覺上還沒到鐵砧就先亮
+            # 打擊瞬間 soft-snap：補剩餘差距的 80%
+            # 速度自適應 lerp 讓鎚子下砸時 k 已很高，剩餘差距本來就小，
+            # soft-snap 只是最後一道保險，不會造成瞬移感
             if new_has_hit and not self.has_hit:
-                self.vcx  = new_vcx
-                self.vcy  = new_vcy
-                self.vcvx = new_vcvx
-                self.vcvy = new_vcvy
+                self.vcx  += (new_vcx  - self.vcx)  * 0.8
+                self.vcy  += (new_vcy  - self.vcy)  * 0.8
+                self.vcvx += (new_vcvx - self.vcvx) * 0.8
+                self.vcvy += (new_vcvy - self.vcvy) * 0.8
         else:
             self.vcx  = new_vcx
             self.vcy  = new_vcy
@@ -214,10 +216,14 @@ class PeerDisplayState:
 
     def tick(self, delta_s: float):
         """每幀更新（sparks 衰減 + lerp）。"""
-        # 指數 lerp（framerate-independent）：k=12，60fps 下每幀移動 ~17%
-        # 三幀（≈50ms）後累計趨近 ~40%，動作平滑但不失響應感
+        # 速度自適應 lerp：鎚子越快 → k 越高 → 收斂越快
+        #   靜止/慢速：k=12（平滑）
+        #   高速下砸（vcvy≈480）：k≈72（幾乎即時）
+        # 解決連打/fever 模式鎚子跟不上而停滯的問題
         if self.lerp_enabled:
-            alpha = 1.0 - math.exp(-12.0 * delta_s)
+            v_abs = abs(self._tgt_vcvy)
+            k = 12.0 + min(v_abs / 8.0, 60.0)
+            alpha = 1.0 - math.exp(-k * delta_s)
             self.vcx  += (self._tgt_vcx  - self.vcx)  * alpha
             self.vcy  += (self._tgt_vcy  - self.vcy)  * alpha
             self.vcvx += (self._tgt_vcvx - self.vcvx) * alpha
