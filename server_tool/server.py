@@ -31,6 +31,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QGroupBox, QLabel, QGridLayout,
     QSplitter, QAction, QMessageBox, QLineEdit, QPushButton,
     QDialog, QDialogButtonBox, QCheckBox,
+    QTreeWidget, QTreeWidgetItem,
 )
 
 # ---------------------------------------------------------------------------
@@ -619,8 +620,11 @@ class MainWindow(QMainWindow):
         # 下半部：房間列表
         room_box = QGroupBox("房間列表")
         room_layout = QVBoxLayout(room_box)
-        self.room_list = QListWidget()
-        self.room_list.itemDoubleClicked.connect(self._on_room_double_clicked)
+        self.room_list = QTreeWidget()
+        self.room_list.setHeaderHidden(True)
+        self.room_list.setRootIsDecorated(False)   # 自行在 row 文字加縮排，不用系統箭頭
+        self.room_list.setIndentation(16)
+        self.room_list.itemClicked.connect(self._on_room_clicked)
         room_layout.addWidget(self.room_list)
         outer.addWidget(room_box, stretch=2)
 
@@ -689,18 +693,36 @@ class MainWindow(QMainWindow):
                 item.setSelected(True)
                 self.player_list.setCurrentItem(item)
 
-        # 房間清單
+        # 房間清單（記住哪些房間已展開）
+        expanded_rooms: set = set()
+        for i in range(self.room_list.topLevelItemCount()):
+            top = self.room_list.topLevelItem(i)
+            if top.isExpanded():
+                expanded_rooms.add(top.data(0, Qt.UserRole))
+
         self.room_list.clear()
         for room, members in rooms.items():
             host_cid = room_hosts.get(room)
             host_info = clients.get(host_cid) if host_cid else None
             host_name = host_info.name if host_info and host_info.name else "（無）"
-            text = "房間 {} · {}/{} 人 · 房主：{}".format(
+            text = "▶  房間 {} · {}/{} 人 · 房主：{}".format(
                 room, len(members), MAX_ROOM_SIZE, host_name
             )
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, room)
-            self.room_list.addItem(item)
+            room_item = QTreeWidgetItem([text])
+            room_item.setData(0, Qt.UserRole, room)
+            for cid in members:
+                info = clients.get(cid)
+                if not info:
+                    continue
+                name = info.name or "未命名"
+                suffix = "  （房主）" if cid == host_cid else ""
+                member_item = QTreeWidgetItem(["    {}{}".format(name, suffix)])
+                member_item.setData(0, Qt.UserRole, None)
+                room_item.addChild(member_item)
+            self.room_list.addTopLevelItem(room_item)
+            if room in expanded_rooms:
+                room_item.setExpanded(True)
+                room_item.setText(0, room_item.text(0).replace("▶", "▼", 1))
 
         self._refresh_status()
 
@@ -751,9 +773,12 @@ class MainWindow(QMainWindow):
 
     def _selected_room(self):
         item = self.room_list.currentItem()
-        if item:
-            return item.data(Qt.UserRole)
-        return None
+        if item is None:
+            return None
+        # 如果點到的是成員 item，往上取父 item（房間）
+        if item.parent() is not None:
+            item = item.parent()
+        return item.data(0, Qt.UserRole)
 
     def _force_disconnect_selected(self):
         cid = self._selected_cid
@@ -788,22 +813,19 @@ class MainWindow(QMainWindow):
             _notify_state()
         self._server.schedule(_dissolve())
 
-    def _on_room_double_clicked(self, item):
-        """雙擊房間列表項目，顯示房間內玩家清單。"""
-        room = item.data(Qt.UserRole)
-        if not room or room not in rooms:
+    def _on_room_clicked(self, item, column):
+        """單擊房間 item → 展開/收合成員列表；單擊成員 item → 無動作。"""
+        if item.parent() is not None:
+            # 點到成員，不做展開切換
             return
-        host_cid = room_hosts.get(room)
-        lines = []
-        for cid in rooms.get(room, []):
-            info = clients.get(cid)
-            if not info:
-                continue
-            name = info.name or "未命名"
-            suffix = "（房主）" if cid == host_cid else ""
-            lines.append(f"  {name}{suffix}")
-        msg = "\n".join(lines) if lines else "（空房間）"
-        QMessageBox.information(self, f"房間 {room} 玩家列表", msg)
+        expanded = not item.isExpanded()
+        item.setExpanded(expanded)
+        # 同步切換箭頭符號
+        old = item.text(0)
+        if expanded:
+            item.setText(0, old.replace("▶", "▼", 1))
+        else:
+            item.setText(0, old.replace("▼", "▶", 1))
 
     def _send_notice(self):
         """廣播公告給所有已連線玩家。"""
