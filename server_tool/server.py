@@ -503,9 +503,30 @@ def startup_enabled():
 
 
 def enable_startup():
-    content = 'start /B pythonw "{}"\n'.format(SCRIPT_PATH)
+    import sys
+    # 使用目前執行中的 Python 直譯器完整路徑
+    # → 不依賴 PATH，確保開機時找得到且套件環境相同
+    python_exe = sys.executable
+    # python.exe → pythonw.exe（靜默無 console 視窗）
+    if python_exe.lower().endswith("python.exe"):
+        candidate = python_exe[:-len("python.exe")] + "pythonw.exe"
+        if os.path.isfile(candidate):
+            python_exe = candidate
+
+    work_dir = os.path.dirname(SCRIPT_PATH)
+
+    # chcp 65001：讓 cmd.exe 以 UTF-8 處理含中文的路徑
+    # cd /d：切換磁碟機 + 目錄，確保相對 import 正常
+    # start /B "" "exe" "script"：第一個 "" 是 start 的視窗標題
+    #   （必須明確給空字串，否則 start 會把帶引號的 exe 路徑誤認為標題）
+    content = (
+        "@echo off\n"
+        "chcp 65001 >nul\n"
+        f'cd /d "{work_dir}"\n'
+        f'start /B "" "{python_exe}" "{SCRIPT_PATH}"\n'
+    )
     os.makedirs(os.path.dirname(STARTUP_BAT), exist_ok=True)
-    with open(STARTUP_BAT, "w", encoding="utf-8") as f:
+    with open(STARTUP_BAT, "w", encoding="utf-8-sig") as f:
         f.write(content)
 
 

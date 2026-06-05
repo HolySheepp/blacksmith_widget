@@ -1,5 +1,12 @@
 # CHANGELOG — 鐵砧桌面放置遊戲
 
+## v0.6.1
+
+### 🖥 伺服器
+- 修復開機自啟無效：改用 `sys.executable` 完整路徑取代裸 `pythonw`，加入工作目錄切換，避免 PATH 依賴和 import 錯誤
+
+---
+
 ## v0.6.0
 
 ### ✨ 視覺調整（Quality of Life）
