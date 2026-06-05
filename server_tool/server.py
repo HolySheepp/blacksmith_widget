@@ -947,8 +947,28 @@ class MainWindow(QMainWindow):
             self._start_server()
 
     def _on_server_error(self, msg):
-        self.statusBar().showMessage("伺服器錯誤：{}".format(msg))
-        QMessageBox.critical(self, "伺服器錯誤", msg)
+        # 伺服器啟動失敗：重置按鈕狀態，讓使用者可以更換 Port 後重試
+        self._act_start.setEnabled(True)
+        self._act_stop.setEnabled(False)
+        self._server = None
+
+        # WinError 10048 / EADDRINUSE：Port 已被佔用，提供友善說明
+        if "10048" in msg or "address already in use" in msg.lower():
+            friendly = (
+                f"Port {self._port} 已被佔用，無法啟動伺服器。\n\n"
+                "最可能的原因：\n"
+                "  • 另一個伺服器實例正在背景執行（例如開機自啟）\n"
+                "  • 其他程式正在使用此 Port\n\n"
+                "解決方式：\n"
+                "  1. 開啟工作管理員，結束其他 pythonw.exe 或\n"
+                "     python.exe 程序後，再按「開啟伺服器」\n"
+                "  2. 或在「伺服器 → 設定」中更換 Port"
+            )
+            self.statusBar().showMessage(f"Port {self._port} 已被佔用")
+            QMessageBox.warning(self, "Port 衝突", friendly)
+        else:
+            self.statusBar().showMessage(f"伺服器錯誤：{msg}")
+            QMessageBox.critical(self, "伺服器錯誤", msg)
 
 
 # ---------------------------------------------------------------------------
