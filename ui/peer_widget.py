@@ -701,13 +701,12 @@ class PeerWidget(QWidget):
             new_pos = event.globalPos() - self._drag_offset
 
             # ── 合作重疊偵測（僅在非 active 狀態時才判斷） ────────────────
+            # 判斷依據：A 的「鐵砧中心點」是否進入 B 的「鐵砧範圍」
             if self._host_widget_ref is not None and self._coop_mode != "active":
-                my_center = QPoint(
-                    new_pos.x() + self.width()  // 2,
-                    new_pos.y() + self.height() // 2,
-                )
-                host_rect = self._host_widget_ref.geometry()
-                new_overlap = host_rect.contains(my_center)
+                anvil_center = self._compute_anvil_center_screen(new_pos)
+                host_anvil   = self._host_anvil_bounds()
+                new_overlap  = (host_anvil is not None
+                                and host_anvil.contains(anvil_center))
                 if new_overlap != self._coop_overlap:
                     self._coop_overlap = new_overlap
                     if new_overlap:
@@ -742,11 +741,35 @@ class PeerWidget(QWidget):
 
     # ── 合作打鐵輔助 ──────────────────────────────────────────────────────────
 
+    def _compute_anvil_center_screen(self, widget_pos: QPoint) -> QPoint:
+        """計算此 peer widget 的鐵砧中心（遊戲座標 AX, (FACE_TOP+_ANVIL_BOT_Y)/2）
+        在螢幕上的座標，給定 widget 左上角位置 widget_pos。"""
+        scale = self._peer_state.ui_scale
+        cx = widget_pos.x() + int(AX * scale)
+        cy = widget_pos.y() + int((FACE_TOP + _ANVIL_BOT_Y) / 2 * scale)
+        return QPoint(cx, cy)
+
+    def _host_anvil_bounds(self) -> "QRect | None":
+        """計算主砧 widget 的鐵砧範圍（螢幕座標），供重疊偵測使用。
+        使用 FACE_L, FACE_R, FACE_TOP, _ANVIL_BOT_Y 四邊。"""
+        host = self._host_widget_ref
+        if host is None:
+            return None
+        try:
+            scale = host.state.ui_scale
+            left   = host.pos().x() + int(FACE_L * scale)
+            right  = host.pos().x() + int(FACE_R * scale)
+            top    = host.pos().y() + int(FACE_TOP * scale)
+            bottom = host.pos().y() + int(_ANVIL_BOT_Y * scale)
+            return QRect(left, top, right - left, bottom - top)
+        except Exception:
+            return None
+
     def _enter_coop_pending(self, new_pos: QPoint):
-        """中心進入主砧範圍，切換為 pending 視覺。"""
+        """鐵砧中心進入主砧鐵砧範圍，切換為 pending 視覺。"""
         self._coop_mode = "pending"
         self._coop_flip_h_active = True
-        # 計算 Y 鎖定位置：讓此 widget 的 FACE_TOP 對齊主砧的 FACE_TOP
+        # Y 鎖定：讓兩個 widget 的 FACE_TOP 在螢幕上對齊
         if self._host_widget_ref is not None:
             try:
                 host_face_screen = (
@@ -760,7 +783,7 @@ class PeerWidget(QWidget):
         self.update()
 
     def _exit_coop_pending(self):
-        """離開 pending 狀態（拖出主砧或取消邀請）。"""
+        """離開 pending 狀態（拖出鐵砧或取消邀請）。"""
         self._coop_mode = "none"
         self._coop_flip_h_active = False
         self._coop_overlap = False
@@ -768,18 +791,20 @@ class PeerWidget(QWidget):
         self.update()
 
     def set_coop_active(self):
-        """由 BlacksmithWidget 在合作確認後呼叫，切換為 active 狀態。"""
+        """合作確認：視窗隱藏，交由主 widget 的 paintEvent 統一渲染鐵錘。"""
         self._coop_mode = "active"
-        self._coop_flip_h_active = True
-        self._coop_snap_y = None      # active 後不再鎖定 Y
-        self.update()
+        self._coop_flip_h_active = False  # 主 widget 用 transform 處理鏡像，這裡不需要
+        self._coop_snap_y = None
+        self.hide()   # 隱藏獨立視窗，合併到主 widget 渲染
+        # 不呼叫 update()：已隱藏，更新無意義
 
     def set_coop_none(self):
-        """結束合作，恢復正常顯示。"""
+        """結束合作，恢復正常獨立視窗顯示。"""
         self._coop_mode = "none"
         self._coop_flip_h_active = False
         self._coop_overlap = False
         self._coop_snap_y = None
+        self.show()   # 重新顯示視窗
         self.update()
 
     def enterEvent(self, event):

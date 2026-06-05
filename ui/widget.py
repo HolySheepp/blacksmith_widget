@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (QWidget, QMenu, QAction, QDialog, QVBoxLayout,
 from PyQt5.QtCore    import Qt, QTimer, QPoint, pyqtSlot, pyqtSignal
 from PyQt5.QtGui     import QPainter, QIcon, QPixmap, QTransform
 
-from config         import WIDGET_W, WIDGET_H
+from config         import WIDGET_W, WIDGET_H, AX, FACE_TOP
 from game.state     import GameState
 from ui.renderer    import draw_frame
 from ui.devtools    import DevToolsDialog
@@ -445,9 +445,7 @@ class BlacksmithWidget(QWidget):
             pm.fill(Qt.transparent)
             p = QPainter(pm)
             p.setRenderHint(QPainter.Antialiasing)
-            draw_frame(p, self.state)
-            if self._own_bubble_alpha > 0.01 and self._own_bubble_text:
-                self._draw_own_bubble(p)
+            self._draw_main_scene(p)
             p.end()
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
@@ -457,10 +455,83 @@ class BlacksmithWidget(QWidget):
         else:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
-            draw_frame(painter, self.state)
-            if self._own_bubble_alpha > 0.01 and self._own_bubble_text:
-                self._draw_own_bubble(painter)
+            self._draw_main_scene(painter)
             painter.end()
+
+    def _draw_main_scene(self, painter: QPainter):
+        """繪製完整場景：自己的砧+錘（作為 guest 時顯示主砧金屬）+合作鐵錘+氣泡。"""
+        # ── 作為 guest：借用主砧的金屬狀態渲染 ───────────────────────────
+        _host_pw = None
+        _orig_metal = _orig_spawned = None
+        if self._coop_host is not None:
+            _host_pw = self._peer_widgets.get(self._coop_host)
+            if _host_pw is not None:
+                _orig_metal   = self.state.current_metal
+                _orig_spawned = self.state.metal_spawned
+                # 暫時替換為主砧的金屬塊（讓 renderer 繪製共用金屬）
+                self.state.current_metal  = _host_pw._peer_state.current_metal
+                self.state.metal_spawned  = _host_pw._peer_state.metal_spawned
+
+        draw_frame(painter, self.state)
+
+        # ── 還原金屬狀態 ───────────────────────────────────────────────────
+        if _orig_metal is not None or _orig_spawned is not None:
+            if _orig_metal   is not None: self.state.current_metal  = _orig_metal
+            if _orig_spawned is not None: self.state.metal_spawned  = _orig_spawned
+
+        # ── 繪製合作者鐵錘（鏡像，左側）──────────────────────────────────
+        # 作為 host：繪製所有 guest 的鐵錘
+        for gname in self._coop_guests:
+            pw = self._peer_widgets.get(gname)
+            if pw is not None:
+                self._draw_secondary_hammer(painter, pw._peer_state)
+        # 作為 guest：繪製 host 的鐵錘
+        if _host_pw is not None:
+            self._draw_secondary_hammer(painter, _host_pw._peer_state)
+
+        if self._own_bubble_alpha > 0.01 and self._own_bubble_text:
+            self._draw_own_bubble(painter)
+
+    def _draw_secondary_hammer(self, painter: QPainter, peer_state):
+        """在主砧 widget 內繪製合作者的鐵錘（以 AX 為軸水平鏡像）。
+
+        原理：translate(2*ax_px, 0) + scale(-1, 1) 等效於以 ax_px 為軸水平翻轉，
+        使 vcx 在螢幕左側出現（對方鐵錘在砧左邊，自己在右邊）。
+        """
+        from ui.peer_widget import PeerDisplayState
+
+        scale  = self.state.ui_scale
+        ax_px  = AX * scale           # 鐵砧中心 X（widget 像素）
+
+        # 建立僅含鐵錘的臨時狀態（使用本 widget 的縮放比例）
+        sec = PeerDisplayState(ui_scale=scale)
+        sec.vcx          = peer_state.vcx
+        sec.vcy          = peer_state.vcy
+        sec.vcvx         = peer_state.vcvx
+        sec.vcvy         = peer_state.vcvy
+        sec.has_hit      = peer_state.has_hit
+        sec.anvil_glow   = peer_state.anvil_glow
+        sec.strike_color = peer_state.strike_color
+        sec.kb_state     = peer_state.kb_state
+        sec.kb_active    = peer_state.kb_active
+        sec.kb_mode      = peer_state.kb_mode
+        sec.turbo_mode   = peer_state.turbo_mode
+        sec.fever_active = peer_state.fever_active
+        sec.heat_level   = peer_state.heat_level
+        sec.sparks       = list(peer_state.sparks)   # 火花也跟著鏡像
+        sec.hide_anvil      = True    # 只畫鐵錘，鐵砧由主 widget 的 draw_frame 負責
+        sec.show_metal_forge = False  # 金屬塊已由主 widget 繪製，不重複
+        sec.lock_position   = True    # 不顯示 ghost guide
+        sec.mouse_on_widget = False
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        # 以鐵砧中心 X 為軸水平鏡像：translate(2*ax, 0) + scale(-1, 1)
+        # → 任何 x 映射為 2*ax - x（vcx ≈ KB_X > AX → 映射到 AX 左側）
+        painter.translate(ax_px * 2, 0)
+        painter.scale(-1.0, 1.0)
+        draw_frame(painter, sec)
+        painter.restore()
 
     def _has_visual_transform(self) -> bool:
         return self.state.flip_h or self.state.flip_v or abs(self.state.rotation) > 0.01
@@ -1358,10 +1429,9 @@ class BlacksmithWidget(QWidget):
         if name in self._coop_guests:
             self._coop_guests.remove(name)
             self._coop_prev_hits.pop(name, None)
-        # 若此玩家是我的合作 host，恢復鐵砧
+        # 若此玩家是我的合作 host，清除 guest 狀態（peer widget 即將被 close）
         if name == self._coop_host:
             self._coop_host = None
-            self.state.hide_anvil = False
         pw = self._peer_widgets.pop(name, None)
         if pw is not None:
             self.state.mp_peer_prefs[name] = pw.get_prefs()   # 儲存偏好再關閉
@@ -1798,29 +1868,26 @@ class BlacksmithWidget(QWidget):
                 pw._exit_coop_pending()
 
     def _activate_coop_as_host(self, guest_name: str):
-        """我是主砧（B），啟動與 guest 的合作。"""
+        """我是主砧（B），啟動與 guest 的合作。
+        guest 的 peer widget 視窗隱藏，改由本 widget 的 paintEvent 鏡像繪製其鐵錘。"""
         if guest_name not in self._coop_guests:
             self._coop_guests.append(guest_name)
         self._coop_prev_hits[guest_name] = False
         self._last_forge_counts = list(self.state.forge_counts)
         pw = self._peer_widgets.get(guest_name)
         if pw:
-            pw.set_coop_active()
-            self._snap_peer_y(pw)
+            pw.set_coop_active()   # 隱藏 peer widget 視窗，由 _draw_secondary_hammer 接管渲染
 
     def _activate_coop_as_guest(self, host_name: str):
-        """我是客砧（A），啟動與 host 的合作。"""
+        """我是客砧（A），啟動與 host 的合作。
+        host 的 peer widget 視窗隱藏，改由本 widget 的 paintEvent 鏡像繪製 host 鐵錘。
+        本 widget 保留鐵砧顯示，但渲染時借用 host 的金屬塊狀態。"""
         self._coop_host = host_name
-        self.state.hide_anvil = True
+        # 不隱藏自己的鐵砧——共用鐵砧在自己的 widget 上顯示
+        # 隱藏 host 的獨立 peer widget 視窗（由本 widget 的 _draw_secondary_hammer 接管）
         pw = self._peer_widgets.get(host_name)
         if pw:
-            from config import FACE_TOP
-            self_face_screen = (self.pos().y()
-                                + int(FACE_TOP * self.state.ui_scale))
-            pw_face_offset = int(FACE_TOP * pw._peer_state.ui_scale)
-            snap_x = self.pos().x() + (self.width() - pw.width()) // 2
-            snap_y = self_face_screen - pw_face_offset
-            pw.move(snap_x, snap_y)
+            pw.hide()
         if self._tray:
             self._tray.showMessage(
                 "⚒️  合作打鐵開始！",
@@ -1828,17 +1895,8 @@ class BlacksmithWidget(QWidget):
                 QSystemTrayIcon.Information, 4000,
             )
 
-    def _snap_peer_y(self, pw):
-        """把 peer widget Y 對齊，使雙方的 FACE_TOP 在螢幕上同高。"""
-        from config import FACE_TOP
-        self_face_screen = (self.pos().y()
-                            + int(FACE_TOP * self.state.ui_scale))
-        pw_face_offset = int(FACE_TOP * pw._peer_state.ui_scale)
-        snap_y = self_face_screen - pw_face_offset
-        pw.move(pw.x(), snap_y)
-
     def _end_coop(self, host_name: str, guest_name: str):
-        """處理結束合作（雙方共用）。"""
+        """處理結束合作（雙方共用）。結束後 peer widget 視窗恢復顯示。"""
         my_name = self._net_client.player_name if self._net_client else ""
         if host_name == my_name:
             if guest_name in self._coop_guests:
@@ -1846,10 +1904,13 @@ class BlacksmithWidget(QWidget):
             self._coop_prev_hits.pop(guest_name, None)
             pw = self._peer_widgets.get(guest_name)
             if pw:
-                pw.set_coop_none()
+                pw.set_coop_none()   # 內部呼叫 pw.show()
         elif guest_name == my_name:
             self._coop_host = None
-            self.state.hide_anvil = False
+            # 恢復 host 的 peer widget 視窗
+            pw = self._peer_widgets.get(host_name)
+            if pw and not pw.isVisible():
+                pw.show()
 
     def _coop_timeout(self, session_id: str):
         """B 等待 A 回應逾時（30 秒）。"""
@@ -1997,16 +2058,18 @@ class BlacksmithWidget(QWidget):
             )
 
     def _reset_coop_state(self):
-        """斷線或離房時重置所有合作狀態。"""
+        """斷線或離房時重置所有合作狀態，並恢復被隱藏的 peer widget 視窗。"""
         for gname in list(self._coop_guests):
             pw = self._peer_widgets.get(gname)
             if pw:
-                pw.set_coop_none()
+                pw.set_coop_none()   # 內部呼叫 pw.show()
         self._coop_guests.clear()
         self._coop_prev_hits.clear()
         self._pending_coop.clear()
         if self._coop_host is not None:
-            self.state.hide_anvil = False
+            pw = self._peer_widgets.get(self._coop_host)
+            if pw and not pw.isVisible():
+                pw.show()    # 恢復 guest 側被隱藏的 host peer widget
             self._coop_host = None
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
