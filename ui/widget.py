@@ -291,6 +291,18 @@ class BlacksmithWidget(QWidget):
         self._frame_timer.setInterval(50)
         self._frame_timer.timeout.connect(self._broadcast_frame)
 
+        # ── 合作打鐵狀態 ──────────────────────────────────────────────────
+        # 我作為主砧（host）時，記錄哪些玩家是我的合作者
+        self._coop_guests:      list  = []    # [guest_name, ...]
+        # 我作為客砧（guest）時，記錄主砧是誰
+        self._coop_host:        "str | None" = None
+        # 待定中的邀請（B等待A回應）：session_id → dict
+        self._pending_coop:     dict  = {}
+        # 偵測各 guest 的打擊狀態（上一幀是否已打擊）
+        self._coop_prev_hits:   dict  = {}    # {guest_name: bool}
+        # 上一幀的 forge_counts，用於偵測金屬完成（觸發獎勵廣播）
+        self._last_forge_counts: list = [0, 0, 0, 0, 0]
+
         # 連接 NetworkClient signals
         if self._net_client is not None:
             self._net_client.room_joined.connect(self._on_room_joined)
@@ -307,6 +319,7 @@ class BlacksmithWidget(QWidget):
             self._net_client.conn_error.connect(self._on_net_conn_error)
             self._net_client.server_error.connect(self._on_net_server_error)
             self._net_client.server_notice.connect(self._on_server_notice)
+            self._net_client.coop_received.connect(self._on_coop_received)
 
         _wlog("[init] __init__ complete")
 
@@ -1249,6 +1262,21 @@ class BlacksmithWidget(QWidget):
             return
         if not self._net_client.is_connected:
             return
+
+        # ── 合作獎勵偵測：forge_counts 增加代表金屬剛完成 ─────────────────
+        if self._coop_guests:
+            from game.metal import METAL_TYPES
+            for i, cnt in enumerate(self.state.forge_counts):
+                if cnt > self._last_forge_counts[i]:
+                    # 金屬類型 i 完成！廣播獎勵給所有合作者
+                    for gname in self._coop_guests:
+                        self._net_client.send_coop({
+                            "action":     "reward",
+                            "to":         gname,
+                            "metal_type": i,
+                            "metal_name": METAL_TYPES[i]["name"],
+                        })
+            self._last_forge_counts = list(self.state.forge_counts)
         # 即使不在房間也廣播，讓伺服器端能即時看到玩家統計資料
         # 伺服器只在玩家有房間時才轉播給其他人
         s = self.state
@@ -1304,6 +1332,9 @@ class BlacksmithWidget(QWidget):
         # 標記「曾在房間」並停止自動重連計時器
         self._was_in_room = True
         self._stop_auto_reconnect()
+        # 重置合作狀態與獎勵基準
+        self._reset_coop_state()
+        self._last_forge_counts = list(self.state.forge_counts)
         # 儲存房間資訊以供下次啟動自動重連
         if self._net_client is not None:
             my_name = self._net_client.player_name or ""
@@ -1323,6 +1354,14 @@ class BlacksmithWidget(QWidget):
             self._create_peer_widget(name)
 
     def _on_player_left(self, name: str):
+        # 若此玩家是我的合作 guest，結束合作
+        if name in self._coop_guests:
+            self._coop_guests.remove(name)
+            self._coop_prev_hits.pop(name, None)
+        # 若此玩家是我的合作 host，恢復鐵砧
+        if name == self._coop_host:
+            self._coop_host = None
+            self.state.hide_anvil = False
         pw = self._peer_widgets.pop(name, None)
         if pw is not None:
             self.state.mp_peer_prefs[name] = pw.get_prefs()   # 儲存偏好再關閉
@@ -1336,6 +1375,7 @@ class BlacksmithWidget(QWidget):
         self.state.mp_room_id = ""
         self.state.mp_player_name = ""
         self.state.mp_server_host = ""
+        self._reset_coop_state()
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
@@ -1343,6 +1383,7 @@ class BlacksmithWidget(QWidget):
         """玩家主動退出房間：不觸發自動重連。"""
         self._was_in_room = False
         self._stop_auto_reconnect()
+        self._reset_coop_state()
         self._close_all_peer_widgets()
         self._hide_chat_input()
 
@@ -1357,6 +1398,15 @@ class BlacksmithWidget(QWidget):
         pw = self._peer_widgets.get(from_name)
         if pw is not None:
             pw.update_from_frame(data)
+
+        # ── 合作打鐵：偵測 guest 打擊，施加 force 到我的金屬 ─────────────
+        if from_name in self._coop_guests:
+            prev = self._coop_prev_hits.get(from_name, False)
+            new  = bool(data.get("has_hit", False))
+            self._coop_prev_hits[from_name] = new
+            if new and not prev:
+                glow = float(data.get("anvil_glow", 0.3))
+                self._apply_coop_strike(glow)
 
     def _on_chat_received(self, from_name: str, text: str):
         my_name = self._net_client.player_name if self._net_client else None
@@ -1373,6 +1423,17 @@ class BlacksmithWidget(QWidget):
             return
         pw = PeerWidget(player_name=name)
         pw.set_lerp(self.state.mp_lerp)   # 繼承目前的 lerp 設定
+
+        # ── 合作打鐵回調 ──────────────────────────────────────────────────
+        pw._host_widget_ref  = self
+        pw._coop_release_cb  = self._on_peer_coop_release
+        pw._coop_end_cb      = self._request_end_coop_for
+        _n = name   # 閉包捕捉
+        pw._coop_pref_getter = lambda: self.state.mp_coop_prefs.get(_n)
+        pw._coop_pref_setter = lambda v: self.state.mp_coop_prefs.update(
+            {_n: v} if v is not None else {}) or (
+            self.state.mp_coop_prefs.pop(_n, None))
+
         pw.show()
         # 還原此玩家的上次偏好（位置、縮放、隱藏砧、名稱固定、靜音、置頂）
         pw.apply_prefs(self.state.mp_peer_prefs.get(name, {}))
@@ -1396,6 +1457,7 @@ class BlacksmithWidget(QWidget):
     def _on_net_connection_dropped(self):
         """WebSocket 意外中斷（重試前立即觸發）：立即關閉 peer widgets。
         若玩家曾在房間，啟動自動重連系統（60s × 10 次）。"""
+        self._reset_coop_state()
         self._close_all_peer_widgets()
         self._hide_chat_input()
         # 只有「本來在房間且尚未啟動重連」才觸發
@@ -1618,6 +1680,334 @@ class BlacksmithWidget(QWidget):
             _Qt.TextWordWrap, text
         )
         painter.restore()
+
+    # ── 合作打鐵 ──────────────────────────────────────────────────────────────
+
+    def _on_peer_coop_release(self, peer_name: str):
+        """PeerWidget 在主砧上鬆開時呼叫（B 邀請 A）。"""
+        if self._net_client is None or not self._net_client.is_connected:
+            pw = self._peer_widgets.get(peer_name)
+            if pw:
+                pw._exit_coop_pending()
+            return
+
+        import time as _time
+        session_id = str(_time.monotonic_ns())
+
+        self._net_client.send_coop({
+            "action":     "invite",
+            "to":         peer_name,
+            "session_id": session_id,
+        })
+
+        self._pending_coop[session_id] = {
+            "guest":      peer_name,
+            "my_choice":  None,
+            "a_response": None,
+        }
+
+        pref = self.state.mp_coop_prefs.get(peer_name)
+        if pref is False:
+            my_choice = False
+            remember  = False
+        elif pref is True:
+            my_choice = True
+            remember  = False
+        else:
+            my_choice, remember = self._show_coop_dialog(peer_name, is_invite=False)
+            if remember:
+                self.state.mp_coop_prefs[peer_name] = my_choice
+
+        pending = self._pending_coop.get(session_id)
+        if pending is None:
+            return
+
+        pending["my_choice"] = my_choice
+
+        if not my_choice:
+            self._net_client.send_coop({
+                "action":     "cancel",
+                "to":         peer_name,
+                "session_id": session_id,
+            })
+            self._pending_coop.pop(session_id, None)
+            pw = self._peer_widgets.get(peer_name)
+            if pw:
+                pw._exit_coop_pending()
+            return
+
+        if pending["a_response"] is not None:
+            self._process_coop_both_responded(session_id, pending)
+        else:
+            QTimer.singleShot(30_000, lambda: self._coop_timeout(session_id))
+
+    def _handle_coop_invite(self, host_name: str, session_id: str):
+        """收到 B 的邀請（我是 A）。"""
+        pref = self.state.mp_coop_prefs.get(host_name)
+        if pref is False:
+            my_choice = False
+        elif pref is True:
+            my_choice = True
+        else:
+            my_choice, remember = self._show_coop_dialog(host_name, is_invite=True)
+            if remember:
+                self.state.mp_coop_prefs[host_name] = my_choice
+
+        self._net_client.send_coop({
+            "action":     "response",
+            "to":         host_name,
+            "session_id": session_id,
+            "accept":     my_choice,
+        })
+
+        if my_choice:
+            QTimer.singleShot(30_000, lambda: self._cancel_guest_pending(host_name))
+
+    def _handle_coop_response(self, guest_name: str, session_id: str, accept: bool):
+        """A 回應了我（B）的邀請。"""
+        pending = self._pending_coop.get(session_id)
+        if not pending:
+            return
+
+        pending["a_response"] = accept
+
+        if pending["my_choice"] is None:
+            return   # B 的對話框仍開著，等 B 決定後再處理
+
+        self._process_coop_both_responded(session_id, pending)
+
+    def _process_coop_both_responded(self, session_id: str, pending: dict):
+        """雙方都已決策，決定合作結果。"""
+        self._pending_coop.pop(session_id, None)
+        guest_name = pending["guest"]
+        my_choice  = pending["my_choice"]
+        a_choice   = pending["a_response"]
+
+        if my_choice and a_choice:
+            my_name = self._net_client.player_name if self._net_client else ""
+            self._net_client.send_coop({
+                "action":     "start",
+                "host":       my_name,
+                "guest":      guest_name,
+                "session_id": session_id,
+            })
+            self._activate_coop_as_host(guest_name)
+        else:
+            pw = self._peer_widgets.get(guest_name)
+            if pw:
+                pw._exit_coop_pending()
+
+    def _activate_coop_as_host(self, guest_name: str):
+        """我是主砧（B），啟動與 guest 的合作。"""
+        if guest_name not in self._coop_guests:
+            self._coop_guests.append(guest_name)
+        self._coop_prev_hits[guest_name] = False
+        self._last_forge_counts = list(self.state.forge_counts)
+        pw = self._peer_widgets.get(guest_name)
+        if pw:
+            pw.set_coop_active()
+            self._snap_peer_y(pw)
+
+    def _activate_coop_as_guest(self, host_name: str):
+        """我是客砧（A），啟動與 host 的合作。"""
+        self._coop_host = host_name
+        self.state.hide_anvil = True
+        pw = self._peer_widgets.get(host_name)
+        if pw:
+            from config import FACE_TOP
+            self_face_screen = (self.pos().y()
+                                + int(FACE_TOP * self.state.ui_scale))
+            pw_face_offset = int(FACE_TOP * pw._peer_state.ui_scale)
+            snap_x = self.pos().x() + (self.width() - pw.width()) // 2
+            snap_y = self_face_screen - pw_face_offset
+            pw.move(snap_x, snap_y)
+        if self._tray:
+            self._tray.showMessage(
+                "⚒️  合作打鐵開始！",
+                f"你正在與「{host_name}」一起鍛造！",
+                QSystemTrayIcon.Information, 4000,
+            )
+
+    def _snap_peer_y(self, pw):
+        """把 peer widget Y 對齊，使雙方的 FACE_TOP 在螢幕上同高。"""
+        from config import FACE_TOP
+        self_face_screen = (self.pos().y()
+                            + int(FACE_TOP * self.state.ui_scale))
+        pw_face_offset = int(FACE_TOP * pw._peer_state.ui_scale)
+        snap_y = self_face_screen - pw_face_offset
+        pw.move(pw.x(), snap_y)
+
+    def _end_coop(self, host_name: str, guest_name: str):
+        """處理結束合作（雙方共用）。"""
+        my_name = self._net_client.player_name if self._net_client else ""
+        if host_name == my_name:
+            if guest_name in self._coop_guests:
+                self._coop_guests.remove(guest_name)
+            self._coop_prev_hits.pop(guest_name, None)
+            pw = self._peer_widgets.get(guest_name)
+            if pw:
+                pw.set_coop_none()
+        elif guest_name == my_name:
+            self._coop_host = None
+            self.state.hide_anvil = False
+
+    def _coop_timeout(self, session_id: str):
+        """B 等待 A 回應逾時（30 秒）。"""
+        pending = self._pending_coop.pop(session_id, None)
+        if not pending:
+            return
+        guest_name = pending["guest"]
+        pw = self._peer_widgets.get(guest_name)
+        if pw:
+            pw._exit_coop_pending()
+
+    def _cancel_guest_pending(self, host_name: str):
+        """A 等待 coop_start 逾時 → 靜默清除。"""
+        if self._coop_host != host_name:
+            return   # 合作已正常開始，忽略
+        self._coop_host = None
+
+    def _receive_coop_reward(self, metal_type: int, metal_name: str):
+        """作為 guest 接收合作獎勵：增加自己的 forge_counts。"""
+        if 0 <= metal_type < len(self.state.forge_counts):
+            self.state.forge_counts[metal_type] += 1
+        if self._tray:
+            self._tray.showMessage(
+                "⚒️  合作鍛造完成！",
+                f"與夥伴共同完成了「{metal_name}」！",
+                QSystemTrayIcon.Information, 5000,
+            )
+
+    def _apply_coop_strike(self, glow: float):
+        """把 guest 的打擊力道施加到自己的金屬塊上。"""
+        s = self.state
+        if not s.show_metal_forge:
+            return
+        m = getattr(s, "current_metal", None)
+        if m is None or m.dead:
+            return
+        force = max(1.0, glow * 3.0)
+        if m.complete:
+            if m.flash_t <= 0.0:
+                m.flash_t = 0.001
+                s.forge_counts[m.type_idx] += 1
+        elif m.spawn_t >= 1.0:
+            m.add_quality(force)
+        s.anvil_glow = min(1.0, max(s.anvil_glow, glow * 0.6))
+
+    def _request_end_coop_for(self, guest_name: str):
+        """右鍵「結束合作」→ B 主動結束。"""
+        if self._net_client is None:
+            return
+        my_name = self._net_client.player_name or ""
+        self._net_client.send_coop({
+            "action": "end",
+            "host":   my_name,
+            "guest":  guest_name,
+        })
+        self._end_coop(my_name, guest_name)
+
+    def _show_coop_dialog(self, peer_name: str, is_invite: bool) -> "tuple[bool, bool]":
+        """顯示合作打鐵對話框。回傳 (accepted, remember_checked)。"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("⚒️  合作打鐵")
+        dlg.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+        dlg.setMinimumWidth(360)
+
+        from PyQt5.QtWidgets import QLabel, QCheckBox
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(12)
+
+        if is_invite:
+            msg_text = (
+                f"「{peer_name}」邀請你一起合作打鐵！\n\n"
+                f"接受後，雙方鐵錘共同鍛造同一個金屬塊，\n"
+                f"打好後雙方都會各自獲得一份材料。"
+            )
+        else:
+            msg_text = (
+                f"想與「{peer_name}」合作打鐵嗎？\n\n"
+                f"合作後，雙方鐵錘共同鍛造同一個金屬塊，\n"
+                f"打好後雙方都會各自獲得一份材料。"
+            )
+
+        msg_lbl = QLabel(msg_text)
+        msg_lbl.setWordWrap(True)
+        lay.addWidget(msg_lbl)
+
+        remember_cb = QCheckBox("記住對此玩家的偏好（下次不再詢問）")
+        lay.addWidget(remember_cb)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        yes_btn = QPushButton("⚒️  合作！")
+        yes_btn.setDefault(True)
+        no_btn  = QPushButton("❌  拒絕")
+        btn_row.addWidget(yes_btn)
+        btn_row.addWidget(no_btn)
+        lay.addLayout(btn_row)
+
+        result = [False]
+        yes_btn.clicked.connect(lambda: (result.__setitem__(0, True),  dlg.accept()))
+        no_btn.clicked.connect( lambda: (result.__setitem__(0, False), dlg.reject()))
+        dlg.exec_()
+        return result[0], remember_cb.isChecked()
+
+    def _on_coop_received(self, msg: dict):
+        """處理所有收到的合作訊號。"""
+        if self._net_client is None:
+            return
+        my_name   = self._net_client.player_name or ""
+        action    = msg.get("action", "")
+        from_name = msg.get("from", "")
+
+        if action == "invite":
+            if msg.get("to") != my_name:
+                return
+            self._handle_coop_invite(from_name, msg.get("session_id", ""))
+
+        elif action == "response":
+            if msg.get("to") != my_name:
+                return
+            self._handle_coop_response(
+                from_name,
+                msg.get("session_id", ""),
+                bool(msg.get("accept", False)),
+            )
+
+        elif action == "start":
+            host  = msg.get("host", "")
+            guest = msg.get("guest", "")
+            if guest == my_name:
+                self._activate_coop_as_guest(host)
+
+        elif action == "end":
+            host  = msg.get("host", "")
+            guest = msg.get("guest", "")
+            if host == my_name or guest == my_name:
+                self._end_coop(host, guest)
+
+        elif action == "reward":
+            if msg.get("to") != my_name:
+                return
+            self._receive_coop_reward(
+                int(msg.get("metal_type", 0)),
+                str(msg.get("metal_name", "未知")),
+            )
+
+    def _reset_coop_state(self):
+        """斷線或離房時重置所有合作狀態。"""
+        for gname in list(self._coop_guests):
+            pw = self._peer_widgets.get(gname)
+            if pw:
+                pw.set_coop_none()
+        self._coop_guests.clear()
+        self._coop_prev_hits.clear()
+        self._pending_coop.clear()
+        if self._coop_host is not None:
+            self.state.hide_anvil = False
+            self._coop_host = None
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 

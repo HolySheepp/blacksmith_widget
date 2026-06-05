@@ -52,6 +52,7 @@ class NetworkClient(QObject):
 
     frame_received = pyqtSignal(str, dict)       # (from_name, frame_data)
     chat_received  = pyqtSignal(str, str)        # (from_name, text)
+    coop_received  = pyqtSignal(dict)            # full coop message dict
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -278,6 +279,9 @@ class NetworkClient(QObject):
             if text:
                 self.server_notice.emit(text)
 
+        elif t == "coop":
+            self.coop_received.emit(msg)
+
     # ── 內部傳送工具 ──────────────────────────────────────────────────────────
 
     async def _send_raw(self, payload: dict):
@@ -337,3 +341,8 @@ class NetworkClient(QObject):
 
     def send_chat(self, text: str):
         self._schedule(self._send_raw({"type": "chat", "text": text}))
+
+    def send_coop(self, payload: dict):
+        """發送合作打鐵訊號（伺服器轉播給房間所有人）。"""
+        msg = {"type": "coop", **payload}
+        self._schedule(self._send_raw(msg))

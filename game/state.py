@@ -212,6 +212,8 @@ class GameState:
         self.mp_lerp:         bool = bool(_sv.get("mp_lerp",        True))
         # 每位玩家的 peer widget 偏好（位置、縮放、隱藏砧等），以玩家名稱為 key
         self.mp_peer_prefs:   dict = dict(_sv.get("mp_peer_prefs",  {}))
+        # 合作打鐵記住偏好：player_name → True（總是合作）/ False（總是拒絕）/ None（每次詢問，不存入 key）
+        self.mp_coop_prefs:   dict = dict(_sv.get("mp_coop_prefs",  {}))
 
         # Transient hover state (set by widget, not saved)
         self.mouse_on_widget: bool = False
@@ -488,6 +490,7 @@ class GameState:
             "mp_port":                 self.mp_port,
             "mp_lerp":                 self.mp_lerp,
             "mp_peer_prefs":           self.mp_peer_prefs,
+            "mp_coop_prefs":           self.mp_coop_prefs,
         }
 
     def _metal_to_save(self) -> dict | None:

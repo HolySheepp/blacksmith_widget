@@ -310,6 +310,19 @@ class PeerWidget(QWidget):
         self._drag_offset:  QPoint | None = None
         self._is_dragging:  bool          = False
 
+        # ── 合作打鐵 ──────────────────────────────────────────────────────
+        # 模式："none" | "pending"（中心進入主砧，等待鬆開）| "active"（已合作）
+        self._coop_mode:          str        = "none"
+        self._coop_flip_h_active: bool       = False   # 合作時強制水平反轉
+        self._coop_overlap:       bool       = False   # 中心是否在主砧範圍內
+        self._coop_snap_y:        int | None = None    # 拖曳時鎖定的 Y 座標
+        # 由 BlacksmithWidget 在建立時設定
+        self._host_widget_ref  = None   # BlacksmithWidget 參照（偵測重疊用）
+        self._coop_release_cb  = None   # fn(peer_name) — 鬆開時呼叫
+        self._coop_pref_getter = None   # fn() -> bool|None
+        self._coop_pref_setter = None   # fn(bool|None) -> None
+        self._coop_end_cb      = None   # fn(peer_name) — 要求結束合作
+
         # ── 聊天氣泡 ──────────────────────────────────────────────────────
         self._bubble_text  = ""
         self._bubble_alpha = 0.0
@@ -504,7 +517,18 @@ class PeerWidget(QWidget):
 
     def _paint_content(self, painter: QPainter):
         """實際繪製內容（場景 + 名稱 + 氣泡），不含視覺 transform。"""
+        # ── 合作模式視覺覆蓋 ──────────────────────────────────────────────
+        _orig_hide = self._peer_state.hide_anvil
+        if self._coop_mode in ("pending", "active"):
+            self._peer_state.hide_anvil = True        # 強制隱藏鐵砧
+            if self._coop_mode == "pending":
+                painter.setOpacity(0.45)              # 半透明
+
         draw_frame(painter, self._peer_state)
+
+        if self._coop_mode in ("pending", "active"):
+            self._peer_state.hide_anvil = _orig_hide  # 還原原始值（不污染狀態）
+        painter.setOpacity(1.0)                        # 名稱 / 氣泡全不透明
 
         painter.save()
         painter.resetTransform()
@@ -516,8 +540,14 @@ class PeerWidget(QWidget):
         self._draw_bubble(painter)
         painter.restore()
 
+    def _effective_flip_h(self) -> bool:
+        """合作模式強制水平反轉（XOR 使用者設定）。"""
+        if self._coop_flip_h_active:
+            return not self._flip_h   # 反向於使用者設定，讓鐵錘面向主砧
+        return self._flip_h
+
     def _has_visual_transform(self) -> bool:
-        return self._flip_h or self._flip_v or abs(self._rotation) > 0.01
+        return self._effective_flip_h() or self._flip_v or abs(self._rotation) > 0.01
 
     def _make_visual_transform(self) -> QTransform:
         w, h = self.width(), self.height()
@@ -526,7 +556,7 @@ class PeerWidget(QWidget):
         t.translate(cx, cy)
         if abs(self._rotation) > 0.01:
             t.rotate(self._rotation)
-        sx = -1.0 if self._flip_h else 1.0
+        sx = -1.0 if self._effective_flip_h() else 1.0
         sy = -1.0 if self._flip_v else 1.0
         if sx != 1.0 or sy != 1.0:
             t.scale(sx, sy)
@@ -668,13 +698,89 @@ class PeerWidget(QWidget):
             if delta.x() ** 2 + delta.y() ** 2 > _DRAG_THRESH2:
                 self._is_dragging = True
         if self._is_dragging and self._drag_offset is not None:
-            self.move(event.globalPos() - self._drag_offset)
+            new_pos = event.globalPos() - self._drag_offset
+
+            # ── 合作重疊偵測（僅在非 active 狀態時才判斷） ────────────────
+            if self._host_widget_ref is not None and self._coop_mode != "active":
+                my_center = QPoint(
+                    new_pos.x() + self.width()  // 2,
+                    new_pos.y() + self.height() // 2,
+                )
+                host_rect = self._host_widget_ref.geometry()
+                new_overlap = host_rect.contains(my_center)
+                if new_overlap != self._coop_overlap:
+                    self._coop_overlap = new_overlap
+                    if new_overlap:
+                        self._enter_coop_pending(new_pos)
+                    else:
+                        self._exit_coop_pending()
+
+            # ── 鎖定 Y 軸（pending 模式：只能水平移動） ───────────────────
+            if self._coop_mode == "pending" and self._coop_snap_y is not None:
+                self.move(new_pos.x(), self._coop_snap_y)
+            else:
+                self.move(new_pos)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            was_dragging = self._is_dragging
+            was_overlap  = self._coop_overlap
+            was_pending  = (self._coop_mode == "pending")
+
             self._is_dragging  = False
             self._press_global = None
             self._drag_offset  = None
+
+            if was_dragging and was_overlap and was_pending:
+                # 鬆開時中心在主砧內 → 觸發合作邀請流程
+                if self._coop_release_cb:
+                    self._coop_release_cb(self._player_name)
+                # 保持 pending 狀態，等待對話框結果
+            elif was_dragging and not was_overlap and was_pending:
+                # 拖出主砧後鬆開 → 取消 pending
+                self._exit_coop_pending()
+
+    # ── 合作打鐵輔助 ──────────────────────────────────────────────────────────
+
+    def _enter_coop_pending(self, new_pos: QPoint):
+        """中心進入主砧範圍，切換為 pending 視覺。"""
+        self._coop_mode = "pending"
+        self._coop_flip_h_active = True
+        # 計算 Y 鎖定位置：讓此 widget 的 FACE_TOP 對齊主砧的 FACE_TOP
+        if self._host_widget_ref is not None:
+            try:
+                host_face_screen = (
+                    self._host_widget_ref.pos().y()
+                    + int(FACE_TOP * self._host_widget_ref.state.ui_scale)
+                )
+                my_face_offset = int(FACE_TOP * self._peer_state.ui_scale)
+                self._coop_snap_y = host_face_screen - my_face_offset
+            except Exception:
+                self._coop_snap_y = new_pos.y()
+        self.update()
+
+    def _exit_coop_pending(self):
+        """離開 pending 狀態（拖出主砧或取消邀請）。"""
+        self._coop_mode = "none"
+        self._coop_flip_h_active = False
+        self._coop_overlap = False
+        self._coop_snap_y = None
+        self.update()
+
+    def set_coop_active(self):
+        """由 BlacksmithWidget 在合作確認後呼叫，切換為 active 狀態。"""
+        self._coop_mode = "active"
+        self._coop_flip_h_active = True
+        self._coop_snap_y = None      # active 後不再鎖定 Y
+        self.update()
+
+    def set_coop_none(self):
+        """結束合作，恢復正常顯示。"""
+        self._coop_mode = "none"
+        self._coop_flip_h_active = False
+        self._coop_overlap = False
+        self._coop_snap_y = None
+        self.update()
 
     def enterEvent(self, event):
         self._hover_hide_timer.stop()   # 取消待定的消失計時
@@ -696,6 +802,24 @@ class PeerWidget(QWidget):
 
     def _show_context_menu(self, global_pos: QPoint):
         menu = QMenu(self)
+
+        # ── 合作打鐵 ──────────────────────────────────────────────────────
+        if self._coop_mode == "active":
+            coop_end_act = QAction("🤝  結束合作打鐵", self)
+            coop_end_act.triggered.connect(self._request_end_coop)
+            menu.addAction(coop_end_act)
+            menu.addSeparator()
+
+        # 合作偏好（不論是否在合作中都可調整）
+        pref = self._coop_pref_getter() if self._coop_pref_getter else None
+        coop_pref_menu = menu.addMenu("🤝  合作偏好")
+        for label, value in [("總是合作", True), ("總是拒絕", False), ("每次詢問", None)]:
+            check = "✔  " if pref == value else "      "
+            act = QAction(check + label, self)
+            act.triggered.connect(lambda _c, v=value: self._set_coop_pref(v))
+            coop_pref_menu.addAction(act)
+
+        menu.addSeparator()
 
         mute_act = QAction("🔇  取消靜音" if self._muted else "🔇  靜音玩家", self)
         mute_act.triggered.connect(self._toggle_mute)
@@ -752,6 +876,16 @@ class PeerWidget(QWidget):
         menu.addAction(center_act)
 
         menu.exec_(global_pos)
+
+    def _request_end_coop(self):
+        """結束合作：回呼 BlacksmithWidget 處理。"""
+        if self._coop_end_cb:
+            self._coop_end_cb(self._player_name)
+
+    def _set_coop_pref(self, value: "bool | None"):
+        """設定對此玩家的合作偏好。"""
+        if self._coop_pref_setter:
+            self._coop_pref_setter(value)
 
     def _toggle_flip_h(self):
         self._flip_h = not self._flip_h

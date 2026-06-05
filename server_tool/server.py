@@ -386,6 +386,13 @@ async def _handle_message(cid, raw):
                 {"type": "chat", "from": info.name, "text": text},
             )
 
+    # --- coop（合作打鐵訊號轉播）-----------------------------------------
+    elif mtype == "coop":
+        if info.room:
+            payload = dict(msg)
+            payload["from"] = info.name
+            await _broadcast_room(info.room, payload, exclude_cid=cid)
+
     # --- pong -------------------------------------------------------------
     elif mtype == "pong":
         info.awaiting_pong = False
