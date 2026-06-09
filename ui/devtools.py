@@ -16,8 +16,9 @@ Buttons:
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSlider, QGroupBox, QFormLayout, QFrame, QCheckBox,
+    QComboBox, QScrollArea, QWidget,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 
 _DEF_MAX_CHARGE = 5
 _DEF_FEV_THRESH = 2
@@ -262,7 +263,90 @@ class DevToolsDialog(QDialog):
         art_box.setLayout(art_form)
         root.addWidget(art_box)
 
-        # ── 6. Bottom buttons ─────────────────────────────────────────────────
+        # ── 6. 寶箱掉落機率 ───────────────────────────────────────────────────
+        chest_box  = QGroupBox("寶箱掉落設定（比重，非百分比）")
+        chest_form = QFormLayout()
+        chest_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        def _make_chest_slider(lo, hi, default):
+            sl  = QSlider(Qt.Horizontal)
+            sl.setRange(lo, hi)
+            sl.setValue(default)
+            sl.setTickInterval(max(1, (hi - lo) // 10))
+            sl.setTickPosition(QSlider.TicksBelow)
+            lbl = QLabel(str(default))
+            lbl.setMinimumWidth(32)
+            return sl, lbl
+
+        self.chest_wood_sl,  self.chest_wood_lbl  = _make_chest_slider(1, 200, 90)
+        self.chest_iron_sl,  self.chest_iron_lbl  = _make_chest_slider(1, 100,  9)
+        self.chest_gold_sl,  self.chest_gold_lbl  = _make_chest_slider(1,  50,  1)
+        self._chest_pct_lbl = QLabel()
+
+        def _update_chest_pct():
+            w = self.chest_wood_sl.value()
+            i = self.chest_iron_sl.value()
+            g = self.chest_gold_sl.value()
+            t = max(1, w + i + g)
+            self._chest_pct_lbl.setText(
+                f"木 {w/t*100:.1f}%  鐵 {i/t*100:.1f}%  金 {g/t*100:.1f}%")
+        self.chest_wood_sl.valueChanged.connect(
+            lambda v: (self.chest_wood_lbl.setText(str(v)), _update_chest_pct()))
+        self.chest_iron_sl.valueChanged.connect(
+            lambda v: (self.chest_iron_lbl.setText(str(v)), _update_chest_pct()))
+        self.chest_gold_sl.valueChanged.connect(
+            lambda v: (self.chest_gold_lbl.setText(str(v)), _update_chest_pct()))
+
+        for label, sl, lbl in [
+            ("木寶箱比重（默認 90）:", self.chest_wood_sl, self.chest_wood_lbl),
+            ("鐵寶箱比重（默認  9）:", self.chest_iron_sl, self.chest_iron_lbl),
+            ("金寶箱比重（默認  1）:", self.chest_gold_sl, self.chest_gold_lbl),
+        ]:
+            row = QHBoxLayout()
+            row.addWidget(sl)
+            row.addWidget(lbl)
+            chest_form.addRow(label, row)
+
+        chest_form.addRow("實際機率:", self._chest_pct_lbl)
+
+        apply_chest = QPushButton("套用寶箱機率")
+        apply_chest.clicked.connect(self._apply_chest_weights)
+        chest_form.addRow(apply_chest)
+        chest_box.setLayout(chest_form)
+        root.addWidget(chest_box)
+
+        # ── 7. 強制下一個物品 ─────────────────────────────────────────────────
+        force_box = QGroupBox("強制下一個物品（打完目前物品後生效）")
+        force_vl  = QVBoxLayout()
+
+        force_row = QHBoxLayout()
+        self.force_item_combo = QComboBox()
+        self._force_item_keys = [
+            "chest_0", "chest_1", "chest_2",
+            "metal_0", "metal_1", "metal_2", "metal_3", "metal_4",
+        ]
+        self._force_item_names = [
+            "木寶箱", "鐵寶箱", "金寶箱",
+            "破銅", "爛鐵", "鐵", "鋼", "精金",
+        ]
+        self.force_item_combo.addItems(self._force_item_names)
+        set_force_btn = QPushButton("設定強制物品")
+        set_force_btn.clicked.connect(self._set_force_next_item)
+        force_row.addWidget(self.force_item_combo, 1)
+        force_row.addWidget(set_force_btn, 0)
+        force_vl.addLayout(force_row)
+
+        status_row = QHBoxLayout()
+        status_row.addWidget(QLabel("待生成："))
+        self.force_status_lbl = QLabel("（無）")
+        self.force_status_lbl.setStyleSheet("color: #e8a020; font-weight: bold;")
+        status_row.addWidget(self.force_status_lbl, 1)
+        force_vl.addLayout(status_row)
+
+        force_box.setLayout(force_vl)
+        root.addWidget(force_box)
+
+        # ── 8. Bottom buttons ─────────────────────────────────────────────────
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setFrameShadow(QFrame.Sunken)
@@ -331,6 +415,22 @@ class DevToolsDialog(QDialog):
         self.art_idle_ms_edit.setText(str(int(s.art_idle_ms)))
         self.art_custom_titles_edit.setText(", ".join(s.art_custom_titles))
 
+        # Chest weights
+        self.chest_wood_sl.blockSignals(True)
+        self.chest_iron_sl.blockSignals(True)
+        self.chest_gold_sl.blockSignals(True)
+        self.chest_wood_sl.setValue(getattr(s, 'chest_wood_weight', 90))
+        self.chest_iron_sl.setValue(getattr(s, 'chest_iron_weight',  9))
+        self.chest_gold_sl.setValue(getattr(s, 'chest_gold_weight',  1))
+        self.chest_wood_lbl.setText(str(self.chest_wood_sl.value()))
+        self.chest_iron_lbl.setText(str(self.chest_iron_sl.value()))
+        self.chest_gold_lbl.setText(str(self.chest_gold_sl.value()))
+        self.chest_wood_sl.blockSignals(False)
+        self.chest_iron_sl.blockSignals(False)
+        self.chest_gold_sl.blockSignals(False)
+        # Force-next status (will be kept live by polling timer)
+        self._refresh_force_status()
+
     # ── Individual apply actions ──────────────────────────────────────────────
 
     def _apply_counters(self):
@@ -393,13 +493,55 @@ class DevToolsDialog(QDialog):
         raw = self.art_custom_titles_edit.text()
         self.state.art_custom_titles = [t.strip().lower() for t in raw.split(",") if t.strip()]
 
+    def _apply_chest_weights(self):
+        self.state.chest_wood_weight = self.chest_wood_sl.value()
+        self.state.chest_iron_weight = self.chest_iron_sl.value()
+        self.state.chest_gold_weight = self.chest_gold_sl.value()
+
+    def _set_force_next_item(self):
+        idx = self.force_item_combo.currentIndex()
+        self.state._force_next_item = self._force_item_keys[idx]
+        self._refresh_force_status()
+
+    def _refresh_force_status(self):
+        v = getattr(self.state, '_force_next_item', None)
+        if v is None:
+            self.force_status_lbl.setText("（無）")
+            self.force_status_lbl.setStyleSheet("color: #888;")
+        else:
+            # Friendly name
+            try:
+                name = self._force_item_names[self._force_item_keys.index(v)]
+            except ValueError:
+                name = v
+            self.force_status_lbl.setText(name)
+            self.force_status_lbl.setStyleSheet(
+                "color: #e8a020; font-weight: bold;")
+
     def _apply_all(self):
         self._apply_counters()
         self._apply_charge()
         self._apply_fever_settings()
         self._apply_crit()
         self._apply_art()
+        self._apply_chest_weights()
 
     def _apply_all_and_close(self):
         self._apply_all()
         self.accept()
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Polling timer: refresh force-next status every 250 ms
+        if not hasattr(self, '_poll_timer'):
+            self._poll_timer = QTimer(self)
+            self._poll_timer.setInterval(250)
+            self._poll_timer.timeout.connect(self._refresh_force_status)
+        self._poll_timer.start()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if hasattr(self, '_poll_timer'):
+            self._poll_timer.stop()

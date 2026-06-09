@@ -5,7 +5,7 @@ SCALE is applied only at render time.
 """
 import math
 
-VERSION = "v0.6.2"   # bump this before every release
+VERSION = "v0.7.0"   # bump this before every release
 
 # ── Display ───────────────────────────────────────────────────────────────────
 WIDGET_W = 480
@@ -82,3 +82,9 @@ CHARGE_EX_IDLE_MS  = 200.0   # ms of inactivity before auto-slam triggers
 FEVER_THRESHOLD = 2       # consecutive full-charge hits to trigger fever
 FEVER_DURATION  = 20.0    # fever active duration (seconds)
 FEVER_COOLDOWN  = 75.0    # post-fever cooldown duration (seconds)
+
+# ── Chest geometry (game coordinate space) ────────────────────────────────────
+CHEST_W      = 74    # total chest width  (px)
+CHEST_H      = 46    # total chest height (px): lid + body
+CHEST_LID_H  = 13    # lid portion height (px)
+CHEST_BODY_H = CHEST_H - CHEST_LID_H   # 33 — main body height

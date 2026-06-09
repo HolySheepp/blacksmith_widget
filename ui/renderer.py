@@ -22,9 +22,11 @@ from config import (
     HEAD_OFFSET, HEAD_PERP,
     HL, HR, HP,
     GRIP_TO_BUTT,
+    CHEST_W, CHEST_H, CHEST_LID_H, CHEST_BODY_H,
     get_charge_color,
 )
-from game.state import GameState
+from game.state  import GameState
+from game.chest  import CHEST_TYPES, CRACK_PATTERNS
 
 
 # ── Pre-cached QColor constants (avoid per-frame allocation) ──────────────────
@@ -55,6 +57,50 @@ _CH_POLL    = QColor(72,  72,  72)
 _CH_FACE    = QColor(88,  88,  88)
 _CH_COLLAR  = QColor(72,  72,  72)
 _CH_COLLAR2 = QColor(96,  96,  96)
+
+# ── Hammer / Anvil skin brush helpers (called per-frame only when skin active) ─
+
+def _hammer_brushes(skin: str | None) -> tuple:
+    """Return (wood, grain, head, bevel, poll, face, collar, collar2) QBrush objects."""
+    if skin == "hammer_wood":
+        return (QBrush(QColor(120, 80,  38)), QBrush(QColor(150,104, 58)),
+                QBrush(QColor( 92, 58,  22)), QBrush(QColor(116, 76, 34)),
+                QBrush(QColor(100, 64,  26)), QBrush(QColor(122, 82, 38)),
+                QBrush(QColor(100, 64,  26)), QBrush(QColor(128, 86, 40)))
+    if skin == "hammer_silver":
+        return (QBrush(QColor(170,176,184)), QBrush(QColor(196,202,210)),
+                QBrush(QColor(162,168,176)), QBrush(QColor(190,196,204)),
+                QBrush(QColor(174,180,188)), QBrush(QColor(186,192,200)),
+                QBrush(QColor(174,180,188)), QBrush(QColor(190,196,204)))
+    if skin == "hammer_gold":
+        return (QBrush(QColor(188,150, 22)), QBrush(QColor(214,174, 40)),
+                QBrush(QColor(180,142, 15)), QBrush(QColor(208,168, 34)),
+                QBrush(QColor(172,134, 10)), QBrush(QColor(198,158, 26)),
+                QBrush(QColor(172,134, 10)), QBrush(QColor(195,155, 24)))
+    # Default — use pre-cached global brushes
+    return (_BR_CH_WOOD, _BR_CH_GRAIN, _BR_CH_HEAD, _BR_CH_BEVEL,
+            _BR_CH_POLL, _BR_CH_FACE,  _BR_CH_COLLAR, _BR_CH_COLLAR2)
+
+
+def _anvil_skin_colors(skin: str | None) -> dict | None:
+    """Return anvil color overrides for the given skin, or None for default."""
+    if skin == "anvil_wood":
+        return {"body": (138, 90, 44), "waist": (108, 70, 32),
+                "base": (162,118, 58), "horn":  (118, 75, 35),
+                "horn2":(152,104, 52), "edge":  (208,165, 88),
+                "face": (143, 96, 46)}
+    if skin == "anvil_silver":
+        return {"body": (186,193,200), "waist": (154,160,168),
+                "base": (206,213,220), "horn":  (168,175,182),
+                "horn2":(193,199,206), "edge":  (234,238,243),
+                "face": (192,198,205)}
+    if skin == "anvil_gold":
+        return {"body": (192,155, 28), "waist": (158,126, 16),
+                "base": (212,172, 42), "horn":  (172,138, 22),
+                "horn2":(206,168, 36), "edge":  (250,218, 80),
+                "face": (200,162, 32)}
+    return None
+
 
 # HUD
 _CHUD_HIT    = QColor(200, 200, 200)
@@ -215,6 +261,7 @@ def draw_frame(painter: QPainter, state: GameState):
     if not state.hide_anvil:
         _draw_anvil_v2(painter, state)
         _draw_metal(painter, state)
+        _draw_chest(painter, state)
         _draw_anvil_mode_indicator(painter, state)
     _draw_sparks(painter, state)
     _draw_embers(painter, state)
@@ -233,41 +280,60 @@ def draw_frame(painter: QPainter, state: GameState):
 
 def _draw_anvil_v2(painter: QPainter, state: GameState):
     """Icon-inspired anvil: trapezoidal face body, defined waist, rounded base.
-    Striking surface stays at FACE_TOP (same as v1) — hammer alignment unchanged."""
+    Striking surface stays at FACE_TOP (same as v1) — hammer alignment unchanged.
+    Supports anvil skin color overrides via state.active_anvil_skin."""
     if state.heat_level > 0:
         glow = max(state.anvil_glow, state.heat_level * 0.22)
     else:
         glow = state.anvil_glow
 
+    # Resolve skin — None means use default pre-cached brushes
+    _skin = _anvil_skin_colors(getattr(state, 'active_anvil_skin', None))
+
+    def _br(key, default_br):
+        """Return QBrush: skin override if active, else default pre-cached brush."""
+        if _skin is None:
+            return default_br
+        c = _skin[key]
+        return QBrush(QColor(c[0], c[1], c[2]))
+
     painter.setPen(Qt.NoPen)
 
     # Base (rounded corners, fixed height, shifted right)
     _bx = AX - _V2_BASE_HW + _V2_BASE_SHIFT
-    painter.setBrush(_BR_V2_BASE)
+    painter.setBrush(_br("base", _BR_V2_BASE))
     painter.drawRoundedRect(
         QRectF(_bx, _V2_WAIST_BOT_Y, _V2_BASE_HW * 2 - 8, _V2_BASE_H),
         10, 10,
     )
-    # Base top-edge strip (lighter band for depth)
-    painter.setBrush(_BR_CA_BASE2)
+    # Base top-edge strip (slightly darker edge band for depth)
+    if _skin is None:
+        painter.setBrush(_BR_CA_BASE2)
+    else:
+        bc = _skin["base"]
+        painter.setBrush(QBrush(QColor(
+            max(0, bc[0] - 50), max(0, bc[1] - 50), max(0, bc[2] - 50))))
     painter.drawRoundedRect(
         QRectF(_bx + 5, _V2_WAIST_BOT_Y - 3, (_V2_BASE_HW - 5) * 2 - 8, 8),
         4, 4,
     )
 
     # Waist column (darkest part — visual depth between face and base)
-    painter.setBrush(_BR_V2_WAIST)
+    painter.setBrush(_br("waist", _BR_V2_WAIST))
     painter.drawRect(QRectF(
         AX - _V2_WAIST_HW, _V2_FACE_BOT_Y,
         _V2_WAIST_HW * 2,  _V2_WAIST_BOT_Y - _V2_FACE_BOT_Y,
     ))
 
     # Face body (trapezoid: wide at face, tapers to waist width)
-    painter.setBrush(_BR_V2_BODY)
+    painter.setBrush(_br("body", _BR_V2_BODY))
     painter.drawPolygon(_POLY_V2_FACE_BODY)
 
-    # Striking face surface — blends from v2 base tint toward last strike colour
-    fr, fg, fb = _V2_FACE_BASE
+    # Striking face surface — blends from base tint toward last strike colour
+    if _skin is None:
+        fr, fg, fb = _V2_FACE_BASE
+    else:
+        fr, fg, fb = _skin["face"]
     sr, sg, sb = state.strike_color
     painter.setBrush(QBrush(QColor(
         int(fr + glow * (sr - fr)),
@@ -277,7 +343,7 @@ def _draw_anvil_v2(painter: QPainter, state: GameState):
     painter.drawRect(QRectF(_V2_TL_X, FACE_TOP, _V2_TR_X - _V2_TL_X, 12))
 
     # Top-edge highlight (bright strip)
-    painter.setBrush(_BR_V2_EDGE)
+    painter.setBrush(_br("edge", _BR_V2_EDGE))
     painter.drawRect(QRectF(_V2_TL_X + 2, FACE_TOP, _V2_TR_X - _V2_TL_X - 4, 3))
 
     # Wear marks
@@ -349,6 +415,158 @@ def _draw_metal(painter: QPainter, state: GameState):
     # 數字標籤已移除；金屬類型改以顏色區分（熱色→冷色插值）
 
 
+# ── Chest (treasure box) ──────────────────────────────────────────────────────
+
+def _draw_chest(painter: QPainter, state: GameState):
+    """Draw the current treasure chest sitting on the anvil face."""
+    if not getattr(state, 'show_metal_forge', True):
+        return
+    chest = getattr(state, 'current_chest', None)
+    if chest is None or chest.dead:
+        return
+
+    spawn_scale = min(1.0, chest.spawn_t)
+    if spawn_scale <= 0.01:
+        return
+
+    meta = CHEST_TYPES[chest.chest_type]
+    br, bg, bb = meta["body_color"]
+    lr, lg, lb = meta["lid_color"]
+    str_r, str_g, str_b = meta["strap_color"]
+    lkr, lkg, lkb = meta["lock_color"]
+    glow_r, glow_g, glow_b = meta["glow_color"]
+
+    # Opening animation: scale up + fade out
+    if chest.flash_t > 0:
+        fade_t = min(1.0, chest.flash_t / 0.6)
+        alpha  = int(max(0, 1.0 - fade_t) * 255)
+        open_scale = 1.0 + fade_t * 0.4
+    else:
+        alpha      = 255
+        open_scale = 1.0
+
+    # Shake offset (when shake_t > 0 — each hit)
+    shake_x = shake_y = 0.0
+    if chest.shake_t > 0:
+        t = getattr(state, 'play_time', 0.0)
+        intensity = min(1.0, chest.shake_t * 5) * chest.ratio
+        shake_x = math.sin(t * 95)  * 3.5 * intensity
+        shake_y = math.cos(t * 75)  * 2.0 * intensity
+
+    # Effective dimensions (apply spawn + open scale)
+    eff_scale = spawn_scale * open_scale
+    cw = CHEST_W  * eff_scale
+    ch = CHEST_H  * eff_scale
+    lh = CHEST_LID_H  * eff_scale
+    bh = CHEST_BODY_H * eff_scale
+
+    # Chest top-left corner (centred on AX, sitting on FACE_TOP)
+    cx = AX - cw / 2 + shake_x
+    cy = FACE_TOP - ch + shake_y
+
+    painter.save()
+    painter.setPen(Qt.NoPen)
+
+    # ── Glow rays (drawn first, behind the chest box) ─────────────────────
+    t_now = getattr(state, 'play_time', 0.0)
+    N_RAYS   = 10
+    center_x = AX + shake_x
+    center_y = FACE_TOP - ch / 2 + shake_y
+    glow_alpha_base = int((0.4 + 0.35 * math.sin(t_now * 3.8)) * 255)
+    if alpha < 255:
+        glow_alpha_base = int(glow_alpha_base * alpha / 255)
+    for i in range(N_RAYS):
+        angle   = t_now * 0.65 + i * (math.pi * 2 / N_RAYS)
+        pulse   = 0.55 + 0.45 * math.sin(t_now * 3.2 + i * 0.7)
+        ray_len = (14 + pulse * 22) * eff_scale
+        ray_al  = int(glow_alpha_base * pulse)
+        if ray_al < 10:
+            continue
+        edge_x = center_x + math.cos(angle) * (cw / 2 + 3)
+        edge_y = center_y + math.sin(angle) * (ch / 2 + 3)
+        tip_x  = center_x + math.cos(angle) * (cw / 2 + 3 + ray_len)
+        tip_y  = center_y + math.sin(angle) * (ch / 2 + 3 + ray_len)
+        pen = QPen(QColor(glow_r, glow_g, glow_b, ray_al))
+        pen.setWidthF(max(0.8, 2.0 * eff_scale - t_now * 0.1 % 0.5))
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(edge_x, edge_y), QPointF(tip_x, tip_y))
+
+    # Pulsing outer glow border
+    glow_border_al = int((0.5 + 0.5 * math.sin(t_now * 4.5)) * 180 * alpha / 255)
+    pen_glow = QPen(QColor(glow_r, glow_g, glow_b, glow_border_al))
+    pen_glow.setWidthF(2.5 * eff_scale)
+    painter.setPen(pen_glow)
+    painter.setBrush(Qt.NoBrush)
+    painter.drawRoundedRect(QRectF(cx - 3, cy - 3, cw + 6, ch + 6), 4, 4)
+    painter.setPen(Qt.NoPen)
+
+    # ── Chest body ────────────────────────────────────────────────────────
+    body_y = cy + lh   # top of body section
+    painter.setBrush(QBrush(QColor(br, bg, bb, alpha)))
+    painter.drawRoundedRect(QRectF(cx, body_y, cw, bh), 3, 3)
+
+    # Body highlight (lighter top strip)
+    hl_h = max(2.0, bh * 0.18)
+    painter.setBrush(QBrush(QColor(
+        min(255, br + 35), min(255, bg + 30), min(255, bb + 25), alpha)))
+    painter.drawRoundedRect(QRectF(cx + 2, body_y, cw - 4, hl_h), 2, 2)
+
+    # ── Metal straps across the body (2 horizontal bands) ────────────────
+    strap_h = max(2.0, bh * 0.14)
+    for fy in (0.28, 0.65):
+        sy = body_y + fy * bh - strap_h / 2
+        painter.setBrush(QBrush(QColor(str_r, str_g, str_b, alpha)))
+        painter.drawRect(QRectF(cx, sy, cw, strap_h))
+        # Strap highlight
+        painter.setBrush(QBrush(QColor(
+            min(255, str_r + 30), min(255, str_g + 28), min(255, str_b + 25),
+            int(alpha * 0.7))))
+        painter.drawRect(QRectF(cx + 1, sy, cw - 2, max(1.0, strap_h * 0.35)))
+
+    # ── Lid ───────────────────────────────────────────────────────────────
+    painter.setBrush(QBrush(QColor(lr, lg, lb, alpha)))
+    painter.drawRoundedRect(QRectF(cx - 2, cy, cw + 4, lh + 2), 3, 3)
+    # Lid bottom edge (slightly darker seam)
+    painter.setBrush(QBrush(QColor(
+        max(0, lr - 30), max(0, lg - 28), max(0, lb - 22), alpha)))
+    painter.drawRect(QRectF(cx - 2, cy + lh - 2, cw + 4, 4))
+
+    # ── Lock (centred on lid-body seam) ──────────────────────────────────
+    lk_w = max(6.0, cw * 0.14)
+    lk_h = max(6.0, ch * 0.22)
+    lk_x = cx + cw / 2 - lk_w / 2
+    lk_y = cy + lh - lk_h * 0.55
+    painter.setBrush(QBrush(QColor(str_r, str_g, str_b, alpha)))
+    painter.drawRoundedRect(QRectF(lk_x, lk_y, lk_w, lk_h), 2, 2)
+    painter.setBrush(QBrush(QColor(lkr, lkg, lkb, alpha)))
+    painter.drawRoundedRect(
+        QRectF(lk_x + 1, lk_y + 1, lk_w - 2, lk_h - 2), 2, 2)
+    # Keyhole dot
+    dot_r = max(1.5, lk_w * 0.22)
+    painter.setBrush(QBrush(QColor(str_r, str_g, str_b, alpha)))
+    painter.drawEllipse(
+        QPointF(cx + cw / 2, lk_y + lk_h * 0.42), dot_r, dot_r)
+
+    # ── Crack lines (shown from crack_level 1–5) ──────────────────────────
+    if chest.crack_level > 0 and alpha > 20:
+        crack_patterns = CRACK_PATTERNS[chest.crack_level - 1]
+        crack_r = max(20, 50 - chest.crack_level * 8)
+        crack_pen = QPen(QColor(crack_r, crack_r // 2, crack_r // 3, alpha))
+        crack_pen.setWidthF(max(0.8, 1.2 * eff_scale))
+        crack_pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(crack_pen)
+        for (fx0, fy0), (fx1, fy1) in crack_patterns:
+            x0 = cx + fx0 * cw
+            y0 = body_y + fy0 * bh
+            x1 = cx + fx1 * cw
+            y1 = body_y + fy1 * bh
+            painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+        painter.setPen(Qt.NoPen)
+
+    painter.restore()
+
+
 # ── Hammer ────────────────────────────────────────────────────────────────────
 
 def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float):
@@ -363,6 +581,10 @@ def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float
 
     cf_now = (state.typing_charge / max(1, state.typing_max_charge)
               if state.kb_mode == "charge" else 0.0)
+
+    # Resolve hammer skin brushes (8-tuple: wood, grain, head, bevel, poll, face, col, col2)
+    _hsk  = getattr(state, 'active_hammer_skin', None)
+    _hb   = _hammer_brushes(_hsk)   # returns tuple of QBrush
 
     painter.setPen(Qt.NoPen)
 
@@ -385,24 +607,24 @@ def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float
         painter.setPen(Qt.NoPen)
 
     # ── Handle ────────────────────────────────────────────────────────────
-    painter.setBrush(_BR_CH_WOOD)
+    painter.setBrush(_hb[0])   # wood / handle color
     painter.drawPolygon(_poly([
         p(-GRIP_TO_BUTT, -6), p(-GRIP_TO_BUTT, 6), p(HL, 6), p(HL, -6),
     ]))
-    painter.setBrush(_BR_CH_GRAIN)
+    painter.setBrush(_hb[1])   # grain
     painter.drawPolygon(_poly([
         p(-GRIP_TO_BUTT + 3, -4), p(-GRIP_TO_BUTT + 3, -1),
         p(HL - 2, -1),            p(HL - 2, -4),
     ]))
 
-    # Grip wraps
+    # Grip wraps (keep dark leather look for all skins — it's a wrap, not the material)
     painter.setBrush(_BR_CH_GRIP)
     for al in range(5, 36, 12):
         painter.drawPolygon(_poly([
             p(al, -6), p(al + 5, -6), p(al + 5, 6), p(al, 6),
         ]))
 
-    # Butt cap
+    # Butt cap (keep dark for all — end-cap contrasts with handle)
     painter.setBrush(_BR_CH_BUTT)
     painter.drawPolygon(_poly([
         p(-GRIP_TO_BUTT - 3, -7), p(-GRIP_TO_BUTT + 2, -7),
@@ -414,17 +636,17 @@ def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float
     painter.drawPolygon(_poly([
         p(HL+2, -HP+2), p(HR+2, -HP+2), p(HR+2, HP+2), p(HL+2, HP+2),
     ]))
-    painter.setBrush(_BR_CH_HEAD)
+    painter.setBrush(_hb[2])   # head base
     painter.drawPolygon(_poly([p(HL, -HP), p(HR, -HP), p(HR, HP), p(HL, HP)]))
-    painter.setBrush(_BR_CH_BEVEL)
+    painter.setBrush(_hb[3])   # bevel
     painter.drawPolygon(_poly([p(HL,-HP), p(HR,-HP), p(HR-2,-HP+5), p(HL+2,-HP+5)]))
-    painter.setBrush(_BR_CH_POLL)
+    painter.setBrush(_hb[4])   # poll
     painter.drawPolygon(_poly([p(HR,-HP), p(HR,HP), p(HR-4,HP-2), p(HR-4,-HP+2)]))
-    painter.setBrush(_BR_CH_FACE)
+    painter.setBrush(_hb[5])   # face
     painter.drawPolygon(_poly([p(HL,HP-5), p(HR,HP-5), p(HR,HP), p(HL,HP)]))
-    painter.setBrush(_BR_CH_COLLAR)
+    painter.setBrush(_hb[6])   # collar
     painter.drawPolygon(_poly([p(HL-2,-HP-2), p(HL+5,-HP-2), p(HL+5,HP+2), p(HL-2,HP+2)]))
-    painter.setBrush(_BR_CH_COLLAR2)
+    painter.setBrush(_hb[7])   # collar highlight
     painter.drawPolygon(_poly([p(HL-2,-HP-2), p(HL+5,-HP-2), p(HL+5,-HP+4), p(HL-2,-HP+4)]))
 
     # ── Proximity heat glow ────────────────────────────────────────────────
@@ -459,18 +681,24 @@ def _draw_hammer(painter: QPainter, state: GameState, cos_a: float, sin_a: float
 
 
 def _render_vcy_fast(state: GameState, cos_a: float, sin_a: float) -> float:
-    """Clamp vcy so the hammer face doesn't visually penetrate the anvil or metal.
+    """Clamp vcy so the hammer face doesn't visually penetrate the anvil, metal, or chest.
     Reuses already-computed cos_a / sin_a from draw_frame — avoids redundant trig."""
     face_y = state.vcy + HEAD_OFFSET * sin_a - HEAD_PERP * cos_a
     face_x = state.vcx + HEAD_OFFSET * cos_a + HEAD_PERP * sin_a
-    # Visual surface rises by metal thickness when metal is visible and fully spawned
-    m = getattr(state, 'current_metal', None)
-    if (getattr(state, 'show_metal_forge', True)
-            and not state.hide_anvil and m is not None and not m.dead
-            and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
-        visual_top = FACE_TOP - m.thickness
+    show_forge = getattr(state, 'show_metal_forge', True)
+    # Chest surface takes priority over metal
+    c = getattr(state, 'current_chest', None)
+    if (show_forge and not state.hide_anvil and c is not None and not c.dead
+            and c.spawn_t >= 1.0 and c.flash_t <= 0.0):
+        visual_top = FACE_TOP - CHEST_H * c.spawn_t
     else:
-        visual_top = FACE_TOP
+        # Visual surface rises by metal thickness when metal is fully spawned
+        m = getattr(state, 'current_metal', None)
+        if (show_forge and not state.hide_anvil and m is not None and not m.dead
+                and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
+            visual_top = FACE_TOP - m.thickness
+        else:
+            visual_top = FACE_TOP
     if face_y > visual_top and FACE_L - 20 <= face_x <= FACE_R + 20:
         return visual_top - HEAD_OFFSET * sin_a + HEAD_PERP * cos_a
     return state.vcy
