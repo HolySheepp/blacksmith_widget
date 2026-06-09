@@ -16,7 +16,7 @@ Buttons:
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSlider, QGroupBox, QFormLayout, QFrame, QCheckBox,
-    QComboBox, QScrollArea, QWidget,
+    QComboBox, QTabWidget, QWidget,
 )
 from PyQt5.QtCore import Qt, QTimer
 
@@ -39,37 +39,75 @@ class DevToolsDialog(QDialog):
         self.state = state
         self.setWindowTitle("🔧 Dev Tools")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(460)
         self._build_ui()
         self._load_from_state()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _tab_page() -> tuple:
+        """Return (QWidget page, QVBoxLayout) for a new tab."""
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setSpacing(8)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.addStretch()   # push content to top
+        return page, lay
+
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setSpacing(10)
-        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+        root.setContentsMargins(10, 10, 10, 10)
 
-        # ── 1. Counter editors ────────────────────────────────────────────────
+        tabs = QTabWidget()
+        root.addWidget(tabs, 1)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Tab 1 — 計數 / 暴擊
+        # ══════════════════════════════════════════════════════════════════════
+        page1, lay1 = self._tab_page()
+
+        # 計數修改
         cg   = QGroupBox("計數修改")
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-
         self.hit_edit   = QLineEdit()
         self.force_edit = QLineEdit()
         self.click_edit = QLineEdit()
-
         form.addRow("⚒  打擊次數:", self.hit_edit)
         form.addRow("◈  力道累積:", self.force_edit)
         form.addRow("✦  點擊次數:", self.click_edit)
-
         apply_ctr = QPushButton("套用計數修改")
         apply_ctr.clicked.connect(self._apply_counters)
         form.addRow(apply_ctr)
         cg.setLayout(form)
-        root.addWidget(cg)
+        lay1.insertWidget(lay1.count() - 1, cg)
 
-        # ── 2. 蓄力設定 ───────────────────────────────────────────────────────
+        # 暴擊設定
+        crit_box  = QGroupBox("暴擊設定")
+        crit_form = QFormLayout()
+        crit_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.crit_rate_edit = QLineEdit()
+        self.crit_rate_edit.setToolTip("暴擊率（%），例如 5.0 = 5%")
+        self.crit_mult_edit = QLineEdit()
+        self.crit_mult_edit.setToolTip("暴擊力道倍率，例如 3.0 = 3 倍")
+        crit_form.addRow("暴擊率（%，默認 5.0）:", self.crit_rate_edit)
+        crit_form.addRow("暴擊倍率（默認 3.0）:",   self.crit_mult_edit)
+        apply_crit = QPushButton("套用暴擊設定")
+        apply_crit.clicked.connect(self._apply_crit)
+        crit_form.addRow(apply_crit)
+        crit_box.setLayout(crit_form)
+        lay1.insertWidget(lay1.count() - 1, crit_box)
+
+        tabs.addTab(page1, "🔢 計數 / 暴擊")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Tab 2 — 蓄力 / 渦輪
+        # ══════════════════════════════════════════════════════════════════════
+        page2, lay2 = self._tab_page()
+
+        # 蓄力設定
         charge_box = QGroupBox("蓄力設定")
         cl = QVBoxLayout()
 
@@ -81,42 +119,35 @@ class DevToolsDialog(QDialog):
         self.charge_slider.setTickPosition(QSlider.TicksBelow)
         self.charge_lbl = QLabel()
         self.charge_lbl.setMinimumWidth(24)
-        # valueChanged only updates the label — state not written until Apply
         self.charge_slider.valueChanged.connect(
-            lambda v: self.charge_lbl.setText(str(v))
-        )
+            lambda v: self.charge_lbl.setText(str(v)))
         slider_row.addWidget(self.charge_slider)
         slider_row.addWidget(self.charge_lbl)
         cl.addLayout(slider_row)
 
-        # 顯示蓄力條 toggle (applies immediately)
         cb_row = QHBoxLayout()
         cb_row.addWidget(QLabel("顯示蓄力條（默認關閉）:"))
         self.charge_bar_cb = QCheckBox()
         self.charge_bar_cb.toggled.connect(
-            lambda v: setattr(self.state, 'show_charge_bar', v)
-        )
+            lambda v: setattr(self.state, 'show_charge_bar', v))
         cb_row.addWidget(self.charge_bar_cb)
         cb_row.addStretch()
         cl.addLayout(cb_row)
 
-        # 蓄力◆ 上抬強度 slider
         lift_row = QHBoxLayout()
         lift_row.addWidget(QLabel(f"蓄力◆上抬強度（默認 {_DEF_EX_LIFT}）:"))
         self.lift_slider = QSlider(Qt.Horizontal)
-        self.lift_slider.setRange(5, 200)   # × 10  →  50 – 2000 units/s
+        self.lift_slider.setRange(5, 200)
         self.lift_slider.setTickInterval(1)
         self.lift_slider.setTickPosition(QSlider.TicksBelow)
         self.lift_lbl = QLabel()
         self.lift_lbl.setMinimumWidth(32)
         self.lift_slider.valueChanged.connect(
-            lambda v: self.lift_lbl.setText(str(v * 10))
-        )
+            lambda v: self.lift_lbl.setText(str(v * 10)))
         lift_row.addWidget(self.lift_slider)
         lift_row.addWidget(self.lift_lbl)
         cl.addLayout(lift_row)
 
-        # 蓄力窗口時長
         window_row = QHBoxLayout()
         window_row.addWidget(QLabel(f"蓄力窗口（ms，默認 {_DEF_WINDOW_MS}）:"))
         self.window_edit = QLineEdit()
@@ -135,14 +166,13 @@ class DevToolsDialog(QDialog):
         apply_charge.clicked.connect(self._apply_charge)
         cl.addWidget(apply_charge)
         charge_box.setLayout(cl)
-        root.addWidget(charge_box)
+        lay2.insertWidget(lay2.count() - 1, charge_box)
 
-        # ── 3. Turbo / Fever settings ─────────────────────────────────────────
+        # 渦輪 / Fever 設定
         tg = QGroupBox("渦輪 / Fever 設定")
         tl = QVBoxLayout()
         tl.setSpacing(8)
 
-        # Fever 滿蓄要求 slider
         fl = QHBoxLayout()
         fl.addWidget(QLabel(f"Fever 滿蓄要求（默認 {_DEF_FEV_THRESH}）:"))
         self.fever_thresh_slider = QSlider(Qt.Horizontal)
@@ -151,10 +181,8 @@ class DevToolsDialog(QDialog):
         self.fever_thresh_slider.setTickPosition(QSlider.TicksBelow)
         self.fever_thresh_lbl = QLabel()
         self.fever_thresh_lbl.setMinimumWidth(24)
-        # valueChanged only updates label
         self.fever_thresh_slider.valueChanged.connect(
-            lambda v: self.fever_thresh_lbl.setText(str(v))
-        )
+            lambda v: self.fever_thresh_lbl.setText(str(v)))
         fl.addWidget(self.fever_thresh_slider)
         fl.addWidget(self.fever_thresh_lbl)
         tl.addLayout(fl)
@@ -169,101 +197,17 @@ class DevToolsDialog(QDialog):
         apply_fever = QPushButton("套用渦輪設定")
         apply_fever.clicked.connect(self._apply_fever_settings)
         tl.addWidget(apply_fever)
-
         tg.setLayout(tl)
-        root.addWidget(tg)
+        lay2.insertWidget(lay2.count() - 1, tg)
 
-        # ── 4. 暴擊設定 ───────────────────────────────────────────────────────
-        crit_box  = QGroupBox("暴擊設定")
-        crit_form = QFormLayout()
-        crit_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        tabs.addTab(page2, "⚡ 蓄力 / 渦輪")
 
-        self.crit_rate_edit = QLineEdit()
-        self.crit_rate_edit.setToolTip("暴擊率（%），例如 5.0 = 5%")
-        self.crit_mult_edit = QLineEdit()
-        self.crit_mult_edit.setToolTip("暴擊力道倍率，例如 3.0 = 3 倍")
+        # ══════════════════════════════════════════════════════════════════════
+        # Tab 3 — 打寶系統
+        # ══════════════════════════════════════════════════════════════════════
+        page3, lay3 = self._tab_page()
 
-        crit_form.addRow("暴擊率（%，默認 5.0）:", self.crit_rate_edit)
-        crit_form.addRow("暴擊倍率（默認 3.0）:",   self.crit_mult_edit)
-
-        apply_crit = QPushButton("套用暴擊設定")
-        apply_crit.clicked.connect(self._apply_crit)
-        crit_form.addRow(apply_crit)
-        crit_box.setLayout(crit_form)
-        root.addWidget(crit_box)
-
-        # ── 5. 美術模式測試 ───────────────────────────────────────────────────
-        art_box  = QGroupBox("美術模式測試")
-        art_form = QFormLayout()
-        art_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-
-        # 永遠開啟美術功能 — applies immediately (dev shortcut, no Apply needed)
-        self.art_always_on_cb = QCheckBox()
-        self.art_always_on_cb.setToolTip(
-            "開啟後，無論當前 focus 在哪個視窗，\n"
-            "拖曳滑鼠都會觸發虛擬點擊（方便開發者測試）"
-        )
-        self.art_always_on_cb.toggled.connect(
-            lambda v: setattr(self.state, 'art_always_on', v))
-        art_form.addRow("永遠開啟美術功能:", self.art_always_on_cb)
-
-        # 拖曳距離閾值
-        self.art_drag_px_edit = QLineEdit()
-        self.art_drag_px_edit.setToolTip("每累積多少像素觸發一次虛擬點擊（默認 20）")
-        art_form.addRow("拖曳閾值 (px，默認 20):", self.art_drag_px_edit)
-
-        # 拖曳速度上限 (CPS)
-        self.art_cps_slider = QSlider(Qt.Horizontal)
-        self.art_cps_slider.setRange(1, 20)
-        self.art_cps_slider.setTickInterval(1)
-        self.art_cps_slider.setTickPosition(QSlider.TicksBelow)
-        self.art_cps_lbl = QLabel()
-        self.art_cps_lbl.setMinimumWidth(30)
-        self.art_cps_slider.valueChanged.connect(
-            lambda v: self.art_cps_lbl.setText(f"{v} cps"))
-        art_cps_row = QHBoxLayout()
-        art_cps_row.addWidget(self.art_cps_slider)
-        art_cps_row.addWidget(self.art_cps_lbl)
-        art_form.addRow(f"拖曳速度上限（默認 {_DEF_DRAG_CPS} cps）:", art_cps_row)
-
-        # 滾輪速度上限 (CPS) — independent from drag CPS
-        self.art_scroll_cps_slider = QSlider(Qt.Horizontal)
-        self.art_scroll_cps_slider.setRange(1, 20)
-        self.art_scroll_cps_slider.setTickInterval(1)
-        self.art_scroll_cps_slider.setTickPosition(QSlider.TicksBelow)
-        self.art_scroll_cps_lbl = QLabel()
-        self.art_scroll_cps_lbl.setMinimumWidth(30)
-        self.art_scroll_cps_slider.valueChanged.connect(
-            lambda v: self.art_scroll_cps_lbl.setText(f"{v} cps"))
-        art_scroll_row = QHBoxLayout()
-        art_scroll_row.addWidget(self.art_scroll_cps_slider)
-        art_scroll_row.addWidget(self.art_scroll_cps_lbl)
-        art_form.addRow(f"滾輪速度上限（默認 {_DEF_SCROLL_CPS} cps）:", art_scroll_row)
-
-        # 美術模式閒置計時器
-        self.art_idle_ms_edit = QLineEdit()
-        self.art_idle_ms_edit.setToolTip(
-            f"在美術模式下（偵測到設計視窗時），閒置計時器延長至此值（毫秒）。\n"
-            f"默認 {_DEF_ART_IDLE} ms，比一般模式的 {_DEF_IDLE_MS} ms 更寬鬆。"
-        )
-        art_form.addRow(f"美術模式閒置（ms，默認 {_DEF_ART_IDLE}）:", self.art_idle_ms_edit)
-
-        # 自訂視窗標題關鍵字（用於 Canva 等頁面標題不含固定字樣的情況）
-        self.art_custom_titles_edit = QLineEdit()
-        self.art_custom_titles_edit.setToolTip(
-            "逗號分隔的視窗標題關鍵字，用於偵測設計相關視窗。\n"
-            "例如：簡報,傳單,海報（適用於 Canva 不顯示「Canva」字樣的頁面）"
-        )
-        art_form.addRow("自訂標題關鍵字:", self.art_custom_titles_edit)
-
-        apply_art = QPushButton("套用美術模式設定")
-        apply_art.clicked.connect(self._apply_art)
-        art_form.addRow(apply_art)
-
-        art_box.setLayout(art_form)
-        root.addWidget(art_box)
-
-        # ── 6. 寶箱掉落機率 ───────────────────────────────────────────────────
+        # 寶箱掉落設定
         chest_box  = QGroupBox("寶箱掉落設定（比重，非百分比）")
         chest_form = QFormLayout()
         chest_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
@@ -278,9 +222,9 @@ class DevToolsDialog(QDialog):
             lbl.setMinimumWidth(32)
             return sl, lbl
 
-        self.chest_wood_sl,  self.chest_wood_lbl  = _make_chest_slider(1, 200, 90)
-        self.chest_iron_sl,  self.chest_iron_lbl  = _make_chest_slider(1, 100,  9)
-        self.chest_gold_sl,  self.chest_gold_lbl  = _make_chest_slider(1,  50,  1)
+        self.chest_wood_sl, self.chest_wood_lbl = _make_chest_slider(1, 200, 90)
+        self.chest_iron_sl, self.chest_iron_lbl = _make_chest_slider(1, 100,  9)
+        self.chest_gold_sl, self.chest_gold_lbl = _make_chest_slider(1,  50,  1)
         self._chest_pct_lbl = QLabel()
 
         def _update_chest_pct():
@@ -290,6 +234,7 @@ class DevToolsDialog(QDialog):
             t = max(1, w + i + g)
             self._chest_pct_lbl.setText(
                 f"木 {w/t*100:.1f}%  鐵 {i/t*100:.1f}%  金 {g/t*100:.1f}%")
+
         self.chest_wood_sl.valueChanged.connect(
             lambda v: (self.chest_wood_lbl.setText(str(v)), _update_chest_pct()))
         self.chest_iron_sl.valueChanged.connect(
@@ -308,14 +253,13 @@ class DevToolsDialog(QDialog):
             chest_form.addRow(label, row)
 
         chest_form.addRow("實際機率:", self._chest_pct_lbl)
-
         apply_chest = QPushButton("套用寶箱機率")
         apply_chest.clicked.connect(self._apply_chest_weights)
         chest_form.addRow(apply_chest)
         chest_box.setLayout(chest_form)
-        root.addWidget(chest_box)
+        lay3.insertWidget(lay3.count() - 1, chest_box)
 
-        # ── 7. 強制下一個物品 ─────────────────────────────────────────────────
+        # 強制下一個物品
         force_box = QGroupBox("強制下一個物品（打完目前物品後生效）")
         force_vl  = QVBoxLayout()
 
@@ -344,22 +288,92 @@ class DevToolsDialog(QDialog):
         force_vl.addLayout(status_row)
 
         force_box.setLayout(force_vl)
-        root.addWidget(force_box)
+        lay3.insertWidget(lay3.count() - 1, force_box)
 
-        # ── 8. Bottom buttons ─────────────────────────────────────────────────
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.HLine)
-        sep2.setFrameShadow(QFrame.Sunken)
-        root.addWidget(sep2)
+        tabs.addTab(page3, "🎁 打寶系統")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Tab 4 — 美術模式
+        # ══════════════════════════════════════════════════════════════════════
+        page4, lay4 = self._tab_page()
+
+        art_box  = QGroupBox("美術模式測試")
+        art_form = QFormLayout()
+        art_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        self.art_always_on_cb = QCheckBox()
+        self.art_always_on_cb.setToolTip(
+            "開啟後，無論當前 focus 在哪個視窗，\n"
+            "拖曳滑鼠都會觸發虛擬點擊（方便開發者測試）")
+        self.art_always_on_cb.toggled.connect(
+            lambda v: setattr(self.state, 'art_always_on', v))
+        art_form.addRow("永遠開啟美術功能:", self.art_always_on_cb)
+
+        self.art_drag_px_edit = QLineEdit()
+        self.art_drag_px_edit.setToolTip("每累積多少像素觸發一次虛擬點擊（默認 20）")
+        art_form.addRow("拖曳閾值 (px，默認 20):", self.art_drag_px_edit)
+
+        self.art_cps_slider = QSlider(Qt.Horizontal)
+        self.art_cps_slider.setRange(1, 20)
+        self.art_cps_slider.setTickInterval(1)
+        self.art_cps_slider.setTickPosition(QSlider.TicksBelow)
+        self.art_cps_lbl = QLabel()
+        self.art_cps_lbl.setMinimumWidth(30)
+        self.art_cps_slider.valueChanged.connect(
+            lambda v: self.art_cps_lbl.setText(f"{v} cps"))
+        art_cps_row = QHBoxLayout()
+        art_cps_row.addWidget(self.art_cps_slider)
+        art_cps_row.addWidget(self.art_cps_lbl)
+        art_form.addRow(f"拖曳速度上限（默認 {_DEF_DRAG_CPS} cps）:", art_cps_row)
+
+        self.art_scroll_cps_slider = QSlider(Qt.Horizontal)
+        self.art_scroll_cps_slider.setRange(1, 20)
+        self.art_scroll_cps_slider.setTickInterval(1)
+        self.art_scroll_cps_slider.setTickPosition(QSlider.TicksBelow)
+        self.art_scroll_cps_lbl = QLabel()
+        self.art_scroll_cps_lbl.setMinimumWidth(30)
+        self.art_scroll_cps_slider.valueChanged.connect(
+            lambda v: self.art_scroll_cps_lbl.setText(f"{v} cps"))
+        art_scroll_row = QHBoxLayout()
+        art_scroll_row.addWidget(self.art_scroll_cps_slider)
+        art_scroll_row.addWidget(self.art_scroll_cps_lbl)
+        art_form.addRow(f"滾輪速度上限（默認 {_DEF_SCROLL_CPS} cps）:", art_scroll_row)
+
+        self.art_idle_ms_edit = QLineEdit()
+        self.art_idle_ms_edit.setToolTip(
+            f"在美術模式下（偵測到設計視窗時），閒置計時器延長至此值（毫秒）。\n"
+            f"默認 {_DEF_ART_IDLE} ms，比一般模式的 {_DEF_IDLE_MS} ms 更寬鬆。")
+        art_form.addRow(f"美術模式閒置（ms，默認 {_DEF_ART_IDLE}）:", self.art_idle_ms_edit)
+
+        self.art_custom_titles_edit = QLineEdit()
+        self.art_custom_titles_edit.setToolTip(
+            "逗號分隔的視窗標題關鍵字，用於偵測設計相關視窗。\n"
+            "例如：簡報,傳單,海報（適用於 Canva 不顯示「Canva」字樣的頁面）")
+        art_form.addRow("自訂標題關鍵字:", self.art_custom_titles_edit)
+
+        apply_art = QPushButton("套用美術模式設定")
+        apply_art.clicked.connect(self._apply_art)
+        art_form.addRow(apply_art)
+
+        art_box.setLayout(art_form)
+        lay4.insertWidget(lay4.count() - 1, art_box)
+
+        tabs.addTab(page4, "🎨 美術模式")
+
+        # ── Bottom buttons (outside tabs) ─────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        root.addWidget(sep)
 
         btn_row = QHBoxLayout()
-        apply_all_btn      = QPushButton("全部套用")
-        apply_close_btn    = QPushButton("套用並關閉")
-        close_btn          = QPushButton("關閉")
+        apply_all_btn   = QPushButton("全部套用")
+        apply_close_btn = QPushButton("套用並關閉")
+        close_btn       = QPushButton("關閉")
 
         apply_all_btn.clicked.connect(self._apply_all)
         apply_close_btn.clicked.connect(self._apply_all_and_close)
-        close_btn.clicked.connect(self.reject)   # reject = close without side-effects
+        close_btn.clicked.connect(self.reject)
 
         btn_row.addWidget(apply_all_btn)
         btn_row.addWidget(apply_close_btn)

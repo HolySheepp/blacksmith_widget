@@ -673,6 +673,11 @@ class BlacksmithWidget(QWidget):
         rotate_act.triggered.connect(self._open_rotation_dialog)
         visual_menu.addAction(rotate_act)
 
+        # ── 造型 picker ────────────────────────────────────────────────────
+        skin_act = QAction("✨  造型", self)
+        skin_act.triggered.connect(self._open_skin_picker)
+        menu.addAction(skin_act)
+
         # ── Lock position toggle ──────────────────────────────────────────
         lock_act = QAction("🔓  解除鎖定位置" if s.lock_position else "🔒  鎖定位置", self)
         lock_act.triggered.connect(self._toggle_lock_position)
@@ -763,6 +768,17 @@ class BlacksmithWidget(QWidget):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+
+    def _open_skin_picker(self):
+        from ui.skin_picker import SkinPickerDialog
+        dlg = SkinPickerDialog(self.state, parent=self)
+        # Position near widget centre so it doesn't open off-screen
+        dlg.adjustSize()
+        gx = self.x() + (self.width()  - dlg.width())  // 2
+        gy = self.y() + (self.height() - dlg.height()) // 2
+        dlg.move(gx, gy)
+        dlg.exec_()
+        self.update()   # refresh in case skin changed
 
     def _toggle_hide_anvil(self):
         self.state.hide_anvil = not self.state.hide_anvil

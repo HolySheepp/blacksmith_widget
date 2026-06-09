@@ -28,7 +28,6 @@ CHEST_TYPES = [
         "strap_color": (100,  65,  30),   # dark leather straps
         "lock_color":  (185, 148,  42),   # brass lock
         "glow_color":  (210, 165,  85),   # warm amber glow
-        "skin_pool":   ["anvil_wood", "hammer_wood"],
         "mat_type":    "wood_scraps",
         "mat_range":   (10, 20),
     },
@@ -41,7 +40,6 @@ CHEST_TYPES = [
         "strap_color": ( 88,  96, 105),   # dark iron straps
         "lock_color":  (215, 220, 225),   # silver lock
         "glow_color":  (175, 210, 245),   # cool blue-silver glow
-        "skin_pool":   ["anvil_silver", "hammer_silver"],
         "mat_type":    "iron_scraps",
         "mat_range":   (5, 12),
     },
@@ -54,7 +52,6 @@ CHEST_TYPES = [
         "strap_color": (145, 112,  10),   # dark gold straps
         "lock_color":  (255, 232,  80),   # bright gold lock
         "glow_color":  (255, 215,  50),   # brilliant gold glow
-        "skin_pool":   ["anvil_gold", "hammer_gold"],
         "mat_type":    "gold_dust",
         "mat_range":   (3, 6),
     },
@@ -97,14 +94,12 @@ CHEST_SPAWN_DUR = 0.35   # scale-in
 CHEST_OPEN_DUR  = 0.55   # opening burst + fade
 
 # ── Skin display names (for UI) ───────────────────────────────────────────────
-SKIN_DISPLAY_NAMES = {
-    "anvil_wood":    "木鐵砧",
-    "anvil_silver":  "銀鐵砧",
-    "anvil_gold":    "金鐵砧",
-    "hammer_wood":   "木錘",
-    "hammer_silver": "銀錘",
-    "hammer_gold":   "金錘",
-}
+def _build_skin_display_names():
+    from game.skin_registry import SKIN_REGISTRY
+    return {sk: sd.label for sk, sd in SKIN_REGISTRY.items()
+            if not sk.endswith("_default")}
+
+SKIN_DISPLAY_NAMES = _build_skin_display_names()
 
 
 # ── ChestPiece ────────────────────────────────────────────────────────────────
@@ -165,8 +160,9 @@ def pick_reward(chest_type: int, owned_skins: set) -> dict:
     Returns {"skin": skin_id} if a new skin is available,
     else {"material": (mat_type, amount)}.
     """
-    pool      = CHEST_TYPES[chest_type]["skin_pool"]
-    available = [s for s in pool if s not in owned_skins]
+    from game.skin_registry import SKIN_REGISTRY
+    available = [sk for sk, sd in SKIN_REGISTRY.items()
+                 if sd.chest_tier == chest_type and sk not in owned_skins]
     if available:
         return {"skin": random.choice(available)}
     mat_type  = CHEST_TYPES[chest_type]["mat_type"]

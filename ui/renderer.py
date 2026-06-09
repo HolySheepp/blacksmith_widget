@@ -245,6 +245,16 @@ def _poly(pts) -> QPolygonF:
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
+def _get_draw_game(skin_id: str | None):
+    """Return the draw_game callable for skin_id, or None if not set.
+    Lazy-imports skin_registry to avoid a circular import at module load time."""
+    if skin_id is None:
+        return None
+    from game.skin_registry import SKIN_REGISTRY
+    sd = SKIN_REGISTRY.get(skin_id)
+    return sd.draw_game if sd is not None else None
+
+
 def draw_frame(painter: QPainter, state: GameState):
     painter.save()
     painter.scale(state.ui_scale, state.ui_scale)
@@ -259,13 +269,23 @@ def draw_frame(painter: QPainter, state: GameState):
         _draw_turbo_overlay(painter, state)
 
     if not state.hide_anvil:
-        _draw_anvil_v2(painter, state)
+        # Dispatch anvil drawing: custom shape if skin has draw_game, else built-in
+        _anvil_draw_game = _get_draw_game(getattr(state, "active_anvil_skin", None))
+        if _anvil_draw_game is not None:
+            _anvil_draw_game(painter, state)
+        else:
+            _draw_anvil_v2(painter, state)
         _draw_metal(painter, state)
         _draw_chest(painter, state)
         _draw_anvil_mode_indicator(painter, state)
     _draw_sparks(painter, state)
     _draw_embers(painter, state)
-    _draw_hammer(painter, state, cos_a, sin_a)
+    # Dispatch hammer drawing: custom shape if skin has draw_game, else built-in
+    _hammer_draw_game = _get_draw_game(getattr(state, "active_hammer_skin", None))
+    if _hammer_draw_game is not None:
+        _hammer_draw_game(painter, state)
+    else:
+        _draw_hammer(painter, state, cos_a, sin_a)
     if not state.hide_anvil:
         _draw_hud(painter, state)
     else:
