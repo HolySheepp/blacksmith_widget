@@ -409,6 +409,11 @@ class BlacksmithWidget(QWidget):
         if self.width() != new_w or self.height() != new_h:
             self.setFixedSize(new_w, new_h)
         self.update()
+        # ── Chest reward notification ─────────────────────────────────────
+        reward = self.state.last_chest_reward
+        if reward is not None:
+            self.state.last_chest_reward = None
+            self._show_chest_reward_toast(reward)
 
     def _autosave(self):
         self._collect_peer_prefs()   # 儲存前快照目前 peer widget 位置/狀態
@@ -668,6 +673,11 @@ class BlacksmithWidget(QWidget):
         rotate_act.triggered.connect(self._open_rotation_dialog)
         visual_menu.addAction(rotate_act)
 
+        # ── 造型 picker ────────────────────────────────────────────────────
+        skin_act = QAction("✨  造型", self)
+        skin_act.triggered.connect(self._open_skin_picker)
+        menu.addAction(skin_act)
+
         # ── Lock position toggle ──────────────────────────────────────────
         lock_act = QAction("🔓  解除鎖定位置" if s.lock_position else "🔒  鎖定位置", self)
         lock_act.triggered.connect(self._toggle_lock_position)
@@ -758,6 +768,17 @@ class BlacksmithWidget(QWidget):
         s.charge_pulses.clear()
         s.charge_ex_armed     = False
         s.charge_ex_timer     = 0.0
+
+    def _open_skin_picker(self):
+        from ui.skin_picker import SkinPickerDialog
+        dlg = SkinPickerDialog(self.state, parent=self)
+        # Position near widget centre so it doesn't open off-screen
+        dlg.adjustSize()
+        gx = self.x() + (self.width()  - dlg.width())  // 2
+        gy = self.y() + (self.height() - dlg.height()) // 2
+        dlg.move(gx, gy)
+        dlg.exec_()
+        self.update()   # refresh in case skin changed
 
     def _toggle_hide_anvil(self):
         self.state.hide_anvil = not self.state.hide_anvil
@@ -887,6 +908,37 @@ class BlacksmithWidget(QWidget):
         toast.move(tx, ty)
         toast.show()
         self._update_toast = toast  # prevent GC from destroying the window
+
+    def _show_chest_reward_toast(self, reward: dict):
+        """Show a notification when a chest is opened and a reward is granted."""
+        from ui.toast import ToastWidget
+        from PyQt5.QtWidgets import QApplication
+        from game.chest import SKIN_DISPLAY_NAMES
+
+        if "skin" in reward:
+            skin_id   = reward["skin"]
+            skin_name = SKIN_DISPLAY_NAMES.get(skin_id, skin_id)
+            title = f"🎁 獲得造型：{skin_name}！"
+            body  = "可在右鍵選單中裝備造型。"
+        else:
+            mat_type, amount = reward["material"]
+            mat_names = {"wood_scraps": "木材碎片", "iron_scraps": "鐵礦碎片", "gold_dust": "金塵"}
+            mat_name  = mat_names.get(mat_type, mat_type)
+            title = f"📦 寶箱已砸開！"
+            body  = f"獲得 {mat_name} × {amount}"
+
+        toast = ToastWidget(title, body)
+        screen = QApplication.desktop().availableGeometry(self)
+        tw, th = toast.width(), toast.height()
+        tx = max(screen.left() + 8, min(
+            self.x() + self.width() // 2 - tw // 2, screen.right() - tw - 8))
+        ty = max(screen.top() + 8, self.y() - th - 12)
+        if ty < screen.top() + 8:
+            tx = screen.right() - tw - 16
+            ty = screen.bottom() - th - 16
+        toast.move(tx, ty)
+        toast.show()
+        self._chest_reward_toast = toast   # prevent GC
 
     def _prompt_and_update(self):
         """Called when player clicks the 'new version' menu item.

@@ -10,6 +10,9 @@ import math
 import random
 from save import load_save
 from game.metal import MetalPiece, pick_metal, METAL_TYPES, SPAWN_DUR, FLASH_DUR
+from game.chest import (ChestPiece, pick_chest, pick_reward,
+                        CHEST_SPAWN_DUR, CHEST_OPEN_DUR,
+                        CHEST_WEIGHTS_DEFAULT, CHEST_HIT_MIN, CHEST_HIT_MAX)
 from config import (
     GAME_W, GAME_H,
     AX, AY_BASE, FACE_TOP, FACE_L, FACE_R,
@@ -22,6 +25,7 @@ from config import (
     TYPING_BASE_MS, TYPING_MAX_CHARGE,
     FEVER_THRESHOLD, FEVER_DURATION, FEVER_COOLDOWN,
     CHARGE_EX_LIFT, CHARGE_EX_IDLE_MS,
+    CHEST_H,
     get_charge_color,
 )
 
@@ -257,6 +261,49 @@ class GameState:
         self.crit_mult: float = float(_sv.get("crit_mult", 3.0))    # force multiplier
         self.last_crit: bool  = False   # transient: was last hit a crit?
 
+        # ── Chest / loot system ────────────────────────────────────────────
+        self.chest_hits_since_last: int  = int(_sv.get("chest_hits_since_last", 0))
+        _default_thresh = random.randint(CHEST_HIT_MIN, CHEST_HIT_MAX)
+        self.chest_drop_threshold:  int  = int(_sv.get("chest_drop_threshold", _default_thresh))
+        self.chest_wood_weight:     int  = int(_sv.get("chest_wood_weight", CHEST_WEIGHTS_DEFAULT[0]))
+        self.chest_iron_weight:     int  = int(_sv.get("chest_iron_weight", CHEST_WEIGHTS_DEFAULT[1]))
+        self.chest_gold_weight:     int  = int(_sv.get("chest_gold_weight", CHEST_WEIGHTS_DEFAULT[2]))
+
+        # Skin inventory
+        self.owned_skins:        set        = set(_sv.get("owned_skins", []))
+        self.active_anvil_skin:  str | None = _sv.get("active_anvil_skin") or None
+        self.active_hammer_skin: str | None = _sv.get("active_hammer_skin") or None
+
+        # Materials stockpile
+        _mat = _sv.get("materials", {})
+        self.materials: dict = {
+            "wood_scraps": int(_mat.get("wood_scraps", 0)),
+            "iron_scraps": int(_mat.get("iron_scraps", 0)),
+            "gold_dust":   int(_mat.get("gold_dust",   0)),
+        }
+
+        # Transient: notifies widget to show a reward toast (cleared after read)
+        self.last_chest_reward: dict | None = None
+
+        # Transient: force a specific item on the next spawn (not saved)
+        # Values: "chest_0", "chest_1", "chest_2", "metal_0" … "metal_4"
+        self._force_next_item: str | None = None
+
+        # Current chest (restored from save if present)
+        _cc_save = _sv.get("current_chest_save") if self.show_metal_forge else None
+        if _cc_save is not None:
+            try:
+                _c = ChestPiece(int(_cc_save["chest_type"]))
+                _c.quality     = float(_cc_save.get("quality", 0.0))
+                _c.spawn_t     = 1.0
+                _c.complete    = bool(_cc_save.get("complete", False))
+                _c.crack_level = int(_cc_save.get("crack_level", 0))
+                self.current_chest: ChestPiece | None = _c
+            except Exception:
+                self.current_chest: ChestPiece | None = None
+        else:
+            self.current_chest: ChestPiece | None = None
+
     # ─────────────────────────────────────────────────────────────────────────
     # Geometry (exact port from JS)
     # ─────────────────────────────────────────────────────────────────────────
@@ -350,7 +397,22 @@ class GameState:
                     m.dead = True
                     self.current_metal = None
                     if self.show_metal_forge:
-                        self._spawn_metal()   # immediately queue next
+                        self._spawn_next_item()   # decide: metal or chest
+
+        # ── Chest opening animations ───────────────────────────────────────
+        if self.current_chest is not None:
+            c = self.current_chest
+            if c.spawn_t < 1.0:
+                c.spawn_t = min(1.0, c.spawn_t + dt / CHEST_SPAWN_DUR)
+            if c.shake_t > 0:
+                c.shake_t = max(0.0, c.shake_t - dt)
+            if c.flash_t > 0.0:
+                c.flash_t = min(1.0, c.flash_t + dt / CHEST_OPEN_DUR)
+                if c.flash_t >= 1.0:
+                    c.dead = True
+                    self.current_chest = None
+                    if self.show_metal_forge:
+                        self._spawn_next_item()
 
         # ── Charge auto-slam timers (lift mode) ───────────────────────────
         # Two independent triggers: hard-cap window OR inactivity gap.
@@ -473,6 +535,17 @@ class GameState:
             "current_metal_save":      self._metal_to_save(),
             "crit_rate":               self.crit_rate,
             "crit_mult":               self.crit_mult,
+            # Chest / loot system
+            "chest_hits_since_last":   self.chest_hits_since_last,
+            "chest_drop_threshold":    self.chest_drop_threshold,
+            "chest_wood_weight":       self.chest_wood_weight,
+            "chest_iron_weight":       self.chest_iron_weight,
+            "chest_gold_weight":       self.chest_gold_weight,
+            "owned_skins":             list(self.owned_skins),
+            "active_anvil_skin":       self.active_anvil_skin,
+            "active_hammer_skin":      self.active_hammer_skin,
+            "materials":               dict(self.materials),
+            "current_chest_save":      self._chest_to_save(),
             "art_mode":                self.art_mode,
             "art_drag_px":             self.art_drag_px,
             "art_drag_max_cps":        self.art_drag_max_cps,
@@ -581,6 +654,19 @@ class GameState:
         self.last_crit      = False
         self.combo_dot_idx  = -1
         self.turbo_line_idx = -1
+        # Chest / loot system
+        self.chest_hits_since_last = 0
+        self.chest_drop_threshold  = random.randint(CHEST_HIT_MIN, CHEST_HIT_MAX)
+        self.chest_wood_weight     = CHEST_WEIGHTS_DEFAULT[0]
+        self.chest_iron_weight     = CHEST_WEIGHTS_DEFAULT[1]
+        self.chest_gold_weight     = CHEST_WEIGHTS_DEFAULT[2]
+        self.owned_skins           = set()
+        self.active_anvil_skin     = None
+        self.active_hammer_skin    = None
+        self.materials             = {"wood_scraps": 0, "iron_scraps": 0, "gold_dust": 0}
+        self.last_chest_reward     = None
+        self._force_next_item      = None
+        self.current_chest         = None
         # Art mode
         self.art_mode           = True
         self.art_drag_px        = 20
@@ -720,9 +806,14 @@ class GameState:
                            if self.kb_mode == "charge" else 1)
         # Metal force — same unit as force_count increment; captured before reset
         _metal_force = (_charge_n_popup if self.kb_mode == "charge" else 1)
-        # Actual visual hit surface Y: top of metal when visible, else anvil face
+        # Actual visual hit surface Y: chest top > metal top > anvil face
         _m = self.current_metal
+        _c = self.current_chest
         if (self.show_metal_forge and not self.hide_anvil
+                and _c is not None and not _c.dead
+                and _c.spawn_t >= 1.0 and _c.flash_t <= 0.0):
+            _hit_y = float(FACE_TOP - CHEST_H)
+        elif (self.show_metal_forge and not self.hide_anvil
                 and _m is not None and not _m.dead
                 and _m.spawn_t >= 1.0 and _m.flash_t <= 0.0):
             _hit_y = FACE_TOP - _m.thickness
@@ -741,6 +832,7 @@ class GameState:
         self.has_hit      = True
         self.hit_cooldown = 380.0
         self.hit_count   += 1
+        self.chest_hits_since_last += 1   # always count toward next chest
 
         if self.kb_mode == "charge":
             self.typing_cooldown = 120.0          # short cooldown — just enough for visual
@@ -798,9 +890,17 @@ class GameState:
         cnt = int((10 + intensity * 60) * charge_mult)
         self._emit_sparks(hit_x, _hit_y, cnt, intensity)
 
-        # ── Metal forging logic ────────────────────────────────────────────
+        # ── Chest / Metal forging logic ────────────────────────────────────
         if self.show_metal_forge:
-            if self.current_metal is not None:
+            if self.current_chest is not None:
+                c = self.current_chest
+                if c.complete:
+                    if c.flash_t <= 0.0:
+                        c.flash_t = 0.001
+                        self._give_chest_reward(c.chest_type)
+                elif c.spawn_t >= 1.0:
+                    c.add_quality(float(_metal_force))
+            elif self.current_metal is not None:
                 m = self.current_metal
                 if m.complete:
                     # This strike triggers flash — count only once (flash_t guard)
@@ -811,9 +911,9 @@ class GameState:
                     # Metal fully spawned — accumulate quality
                     m.add_quality(float(_metal_force))
             elif not self.metal_spawned:
-                # Very first strike of this session → spawn first metal
+                # Very first strike of this session → spawn first item
                 self.metal_spawned = True
-                self._spawn_metal()
+                self._spawn_next_item()
 
         # 連打模式三角點：每次打擊推進一格（非渦輪模式）
         if self.kb_mode == "combo" and not self.turbo_mode:
@@ -827,6 +927,58 @@ class GameState:
     def _spawn_metal(self):
         """Spawn a new metal piece on the anvil (weighted random type)."""
         self.current_metal = MetalPiece(pick_metal())
+
+    def _spawn_next_item(self):
+        """Decide whether to spawn a chest or a metal piece next.
+        Checks _force_next_item first; then checks chest_hits_since_last threshold."""
+        force = self._force_next_item
+        self._force_next_item = None
+
+        if force is not None:
+            if force.startswith("chest_"):
+                tier = int(force.split("_")[1])
+                self.current_chest = ChestPiece(tier)
+                return
+            if force.startswith("metal_"):
+                idx = int(force.split("_")[1])
+                self.current_metal = MetalPiece(idx)
+                return
+
+        # Natural drop logic: chest every CHEST_HIT_MIN–CHEST_HIT_MAX hits
+        if self.chest_hits_since_last >= self.chest_drop_threshold:
+            self.chest_hits_since_last = 0
+            self.chest_drop_threshold  = random.randint(CHEST_HIT_MIN, CHEST_HIT_MAX)
+            weights = [self.chest_wood_weight,
+                       self.chest_iron_weight,
+                       self.chest_gold_weight]
+            tier = pick_chest(weights)
+            self.current_chest = ChestPiece(tier)
+        else:
+            self._spawn_metal()
+
+    def _give_chest_reward(self, chest_type: int):
+        """Award a skin or materials for opening a chest; set last_chest_reward."""
+        reward = pick_reward(chest_type, self.owned_skins)
+        if "skin" in reward:
+            self.owned_skins.add(reward["skin"])
+        else:
+            mat_type, amount = reward["material"]
+            self.materials[mat_type] = self.materials.get(mat_type, 0) + amount
+        self.last_chest_reward = reward   # widget.py picks this up to show toast
+
+    def _chest_to_save(self) -> dict | None:
+        """Serialize current chest for save; returns None during animations."""
+        c = self.current_chest
+        if (c is None or c.dead
+                or c.spawn_t < 1.0
+                or c.flash_t > 0.0):
+            return None
+        return {
+            "chest_type":  c.chest_type,
+            "quality":     c.quality,
+            "complete":    c.complete,
+            "crack_level": c.crack_level,
+        }
 
     def _enter_fever(self):
         """Enter Fever state: switch to combo mode for fever_duration seconds."""
