@@ -290,6 +290,23 @@ class DevToolsDialog(QDialog):
         force_box.setLayout(force_vl)
         lay3.insertWidget(lay3.count() - 1, force_box)
 
+        # ── Skin unlock (testing) ─────────────────────────────────────────────
+        skin_box = QGroupBox("造型解鎖（測試用）")
+        skin_vl  = QVBoxLayout()
+
+        unlock_all_btn = QPushButton("解鎖所有造型")
+        unlock_all_btn.setToolTip("將登錄在 skin_registry 中的所有造型加入已擁有清單")
+        unlock_all_btn.clicked.connect(self._unlock_all_skins)
+        skin_vl.addWidget(unlock_all_btn)
+
+        reset_skins_btn = QPushButton("清除所有造型（保留預設）")
+        reset_skins_btn.setToolTip("清空 owned_skins，重置裝備中的造型為預設")
+        reset_skins_btn.clicked.connect(self._reset_skins)
+        skin_vl.addWidget(reset_skins_btn)
+
+        skin_box.setLayout(skin_vl)
+        lay3.insertWidget(lay3.count() - 1, skin_box)
+
         tabs.addTab(page3, "🎁 打寶系統")
 
         # ══════════════════════════════════════════════════════════════════════
@@ -543,6 +560,16 @@ class DevToolsDialog(QDialog):
     def _apply_all_and_close(self):
         self._apply_all()
         self.accept()
+
+    def _unlock_all_skins(self):
+        from game.skin_registry import SKIN_REGISTRY
+        for sk in SKIN_REGISTRY:
+            self.state.owned_skins.add(sk)
+
+    def _reset_skins(self):
+        self.state.owned_skins.clear()
+        self.state.active_anvil_skin  = None
+        self.state.active_hammer_skin = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
