@@ -246,13 +246,21 @@ def _poly(pts) -> QPolygonF:
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def _get_draw_game(skin_id: str | None):
-    """Return the draw_game callable for skin_id, or None if not set.
-    Lazy-imports skin_registry to avoid a circular import at module load time."""
+    """Return the draw_game callable for skin_id, or None if not set."""
     if skin_id is None:
         return None
     from game.skin_registry import SKIN_REGISTRY
     sd = SKIN_REGISTRY.get(skin_id)
     return sd.draw_game if sd is not None else None
+
+
+def _skin_override(skin_id: str | None, attr: str):
+    """Return a named override callable from the registry, or None."""
+    if skin_id is None:
+        return None
+    from game.skin_registry import SKIN_REGISTRY
+    sd = SKIN_REGISTRY.get(skin_id)
+    return getattr(sd, attr, None) if sd is not None else None
 
 
 def draw_frame(painter: QPainter, state: GameState):
@@ -385,6 +393,10 @@ def _draw_anvil_v2(painter: QPainter, state: GameState):
 def _draw_metal(painter: QPainter, state: GameState):
     """Draw the current metal piece sitting on the anvil face."""
     if not getattr(state, 'show_metal_forge', True):
+        return
+    custom = _skin_override(getattr(state, 'active_anvil_skin', None), 'draw_material')
+    if custom is not None:
+        custom(painter, state)
         return
     m = getattr(state, 'current_metal', None)
     if m is None or m.dead:
@@ -727,7 +739,12 @@ def _render_vcy_fast(state: GameState, cos_a: float, sin_a: float) -> float:
 # ── Sparks ────────────────────────────────────────────────────────────────────
 
 def _draw_sparks(painter: QPainter, state: GameState):
+    custom = _skin_override(getattr(state, 'active_anvil_skin', None), 'draw_spark')
     for s in state.sparks:
+        if custom is not None:
+            custom(painter, s)
+            continue
+
         al = s.frac
         sz = s.size * al
         if sz < 0.4:
@@ -759,8 +776,13 @@ def _draw_embers(painter: QPainter, state: GameState):
     embers = getattr(state, 'embers', None)
     if not embers:
         return
+    custom = _skin_override(getattr(state, 'active_anvil_skin', None), 'draw_ember')
     painter.setPen(Qt.NoPen)
     for e in embers:
+        if custom is not None:
+            custom(painter, e)
+            continue
+
         frac = e.frac                         # 1.0 → 0.0 over lifetime
         # Fade in for first 15%, hold, fade out for last 45%
         if frac > 0.85:

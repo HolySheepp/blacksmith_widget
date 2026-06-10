@@ -1,5 +1,13 @@
 # CHANGELOG — 鐵砧桌面放置遊戲
 
+## v0.8.4
+- 木魚形狀重製：改用 QPainterPath 非對稱梨形，左側圓潤（魚頭）右側收尖（魚尾）、木紋弧線、去除熱光效果
+- SkinDef 新增 draw_spark / draw_ember / draw_material 三個造型覆寫欄位
+- renderer 三個繪製函數加入 dispatch：active_anvil_skin 有對應 override 則優先呼叫
+- 木魚主題粒子：打擊飛出暗紫色「煩惱」煙霧、上浮金色「功德」光點、業力方塊（帶苦臉）替換金屬條
+
+---
+
 ## v0.8.3
 - DevTools 🎁 打寶系統新增「解鎖所有造型」與「清除所有造型」按鈕，方便測試 skin
 
