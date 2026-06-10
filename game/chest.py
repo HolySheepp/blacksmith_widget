@@ -85,7 +85,7 @@ CRACK_PATTERNS = [
 ]
 
 # ── Default drop settings ─────────────────────────────────────────────────────
-CHEST_WEIGHTS_DEFAULT = [90, 9, 1]   # wood : iron : gold (weights, not %)
+CHEST_WEIGHTS_DEFAULT = [60, 30, 10]  # wood : iron : gold (weights, not %)
 CHEST_HIT_MIN         = 8_000
 CHEST_HIT_MAX         = 12_000
 
