@@ -291,6 +291,7 @@ def _wf_draw_ember(painter, ember):
 def _wf_draw_material(painter, state):
     """'業力怨靈' — a troubled karma spirit being knocked into the fish's slit.
     Fixed size; each strike pushes it deeper until fully absorbed into the wood."""
+    import math
     from PyQt5.QtGui import QColor, QBrush, QPen
     from PyQt5.QtCore import Qt, QPointF, QRectF, QRect
     from config import AX, FACE_TOP
@@ -321,6 +322,12 @@ def _wf_draw_material(painter, state):
     submerge_cy = float(FACE_TOP) + r_y * 0.6    # ratio=1: mostly inside the fish
     cx = float(AX)
     cy = hover_cy + m.ratio * (submerge_cy - hover_cy)
+
+    # Idle jitter — makes the spirit look alive
+    t_now = getattr(state, 'play_time', 0.0)
+    j = m.ratio * 2.8
+    cx += math.sin(t_now * 11.3) * j
+    cy += math.cos(t_now *  9.1) * j * 0.65
 
     # Clip so the portion that has sunk below the slit is hidden
     painter.setClipRect(QRect(0, 0, 800, int(FACE_TOP) + 2))
@@ -391,6 +398,18 @@ def _wf_draw_material(painter, state):
         painter.setPen(Qt.NoPen)
 
     painter.restore()
+
+    # ── Curved wood seam at junction ────────────────────────────────────────
+    # Fades in as orb approaches FACE_TOP, creating a rounded-opening look
+    seam_prox = (cy + r_y - (float(FACE_TOP) - 30.0)) / 30.0
+    seam_a    = max(0.0, min(1.0, seam_prox))
+    if seam_a > 0.01:
+        from PyQt5.QtGui import QColor, QBrush
+        from PyQt5.QtCore import Qt, QPointF
+        rim_col = QColor(110, 75, 32, int(seam_a * min(alpha, 255)))
+        painter.setBrush(QBrush(rim_col))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QPointF(cx, float(FACE_TOP) + 9.0), r_x * 0.93, 12.0)
 
 
 def _make_mallet_game(ball_dark, ball_main, ball_hl, ball_edge, glow_rgb=(255, 102, 0)):
@@ -601,12 +620,197 @@ def _mallet_thumb_fn(game_fn=None, skin_id="hammer_mallet") -> Callable:
     return draw
 
 
+# ── 年糕臼 / 打糕錘 skins ──────────────────────────────────────────────────────
+
+def _mochi_anvil_game(painter, state):
+    """Draw a stone mortar (年糕臼) replacing the anvil.
+    Bowl opening at FACE_TOP; thick walls taper to a flat base."""
+    from PyQt5.QtGui import QColor, QBrush, QPen, QPolygonF
+    from PyQt5.QtCore import Qt, QPointF, QRectF
+    from config import AX, FACE_TOP
+
+    cx  = float(AX)
+    top = float(FACE_TOP)
+    bot = top + 150.0
+    ow  = 90.0   # outer half-width at top
+    iw  = 60.0   # inner bowl half-width at top
+
+    def Q(pts):
+        return QPolygonF([QPointF(x, y) for x, y in pts])
+
+    painter.setPen(Qt.NoPen)
+
+    # Ground shadow
+    painter.setBrush(QBrush(QColor(0, 0, 0, 55)))
+    painter.drawEllipse(QRectF(cx - 72, bot - 5, 144, 18))
+
+    # Outer stone body (left wall, right wall, base slab)
+    stone_main = QColor(128, 120, 112)
+    painter.setBrush(QBrush(stone_main))
+    painter.drawPolygon(Q([
+        (cx - ow, top), (cx - iw, top + 4),
+        (cx - iw + 6, bot - 12), (cx - ow + 4, bot),
+    ]))
+    painter.drawPolygon(Q([
+        (cx + iw, top + 4), (cx + ow, top),
+        (cx + ow - 4, bot), (cx + iw - 6, bot - 12),
+    ]))
+    painter.drawRoundedRect(QRectF(cx - ow + 4, bot - 14, (ow - 4) * 2, 20), 5, 5)
+
+    # Stone highlights on wall faces
+    painter.setBrush(QBrush(QColor(152, 144, 136)))
+    painter.drawPolygon(Q([
+        (cx - ow, top), (cx - ow + 10, top),
+        (cx - iw + 12, bot - 12), (cx - ow + 4, bot - 12),
+    ]))
+    painter.drawPolygon(Q([
+        (cx + ow - 10, top), (cx + ow, top),
+        (cx + ow - 4, bot - 12), (cx + iw - 12, bot - 12),
+    ]))
+
+    # Inner bowl (dark shadow — the hollow)
+    painter.setBrush(QBrush(QColor(70, 64, 58)))
+    painter.drawPolygon(Q([
+        (cx - iw, top + 4), (cx + iw, top + 4),
+        (cx + iw - 6, bot - 12), (cx - iw + 6, bot - 12),
+    ]))
+
+    # Bowl bottom highlight
+    painter.setBrush(QBrush(QColor(88, 82, 76)))
+    painter.drawEllipse(QRectF(cx - 28, bot - 26, 56, 16))
+
+    # Top rim (raised ledge at FACE_TOP)
+    rim_w = ow + 5.0
+    painter.setBrush(QBrush(QColor(162, 154, 146)))
+    painter.drawRoundedRect(QRectF(cx - rim_w, top - 3, rim_w * 2, 14), 4, 4)
+    painter.setBrush(QBrush(QColor(188, 180, 172)))
+    painter.drawRoundedRect(QRectF(cx - rim_w + 2, top - 3, rim_w * 2 - 4, 5), 2, 2)
+
+    # Rim notch where pestle hits
+    painter.setBrush(QBrush(QColor(138, 130, 122)))
+    painter.drawEllipse(QRectF(cx - 42, top + 2, 84, 8))
+
+
+def _mochi_draw_material(painter, state):
+    """Draw elastic mochi (年糕) being pounded in the mortar.
+    Flattens with ratio; squishes elastically on each hit."""
+    import math
+    from PyQt5.QtGui import QColor, QBrush
+    from PyQt5.QtCore import Qt, QPointF, QRectF
+    from config import AX, FACE_TOP
+
+    m = getattr(state, 'current_metal', None)
+    if m is None or m.dead:
+        return
+    spawn_scale = min(1.0, m.spawn_t)
+    if spawn_scale <= 0.01:
+        return
+
+    if m.flash_t > 0.0:
+        flash_rise  = m.flash_t * 85.0
+        flash_alpha = max(0, int((1.0 - m.flash_t) * 255))
+        flash_str   = m.flash_t * 0.35   # stretches taller during launch
+    else:
+        flash_rise = flash_str = 0.0
+        flash_alpha = 255
+
+    # Elastic hit deformation via hit_cooldown (380ms window)
+    hcool = getattr(state, 'hit_cooldown', 0.0)
+    hit_t = 1.0 - min(1.0, hcool / 380.0)
+    squish = math.sin(hit_t * math.pi * 2.6) * math.exp(-hit_t * 3.8)
+
+    # Idle bounce
+    t_now = getattr(state, 'play_time', 0.0)
+    idle  = math.sin(t_now * 5.8) * 0.038
+
+    # Shape: ry shrinks (mochi flattens), rx grows (spreads out)
+    base_ry = (40.0 * (1.0 - m.ratio * 0.70) + flash_str * 18.0) * spawn_scale
+    base_rx = (62.0 * (1.0 + m.ratio * 0.40)) * spawn_scale
+    ry = max(4.0, base_ry * (1.0 - squish * 0.55 + idle))
+    rx = base_rx * (1.0 + squish * 0.40 - idle * 0.4)
+
+    cx = float(AX)
+    cy = float(FACE_TOP) - ry - flash_rise
+
+    painter.save()
+    painter.setPen(Qt.NoPen)
+
+    # Drop shadow under mochi
+    painter.setBrush(QBrush(QColor(148, 138, 110, int(55 * flash_alpha / 255))))
+    painter.drawEllipse(QRectF(cx - rx * 0.82 + 3, float(FACE_TOP) - 4,
+                               rx * 1.64, 9))
+
+    # Main mochi body (warm cream)
+    painter.setBrush(QBrush(QColor(242, 238, 222, flash_alpha)))
+    painter.drawEllipse(QPointF(cx, cy), rx, ry)
+
+    # Lower shadow (inside — represents curvature)
+    painter.setBrush(QBrush(QColor(208, 198, 172, int(flash_alpha * 0.52))))
+    painter.drawEllipse(QPointF(cx, cy + ry * 0.3), rx * 0.85, ry * 0.58)
+
+    # Top specular highlight
+    painter.setBrush(QBrush(QColor(255, 254, 248, int(flash_alpha * 0.80))))
+    painter.drawEllipse(QPointF(cx - rx * 0.22, cy - ry * 0.28), rx * 0.44, ry * 0.35)
+
+    painter.restore()
+
+
+def _mochi_draw_spark(painter, spark):
+    """Soft flour-dust puffs rising from the mochi."""
+    from PyQt5.QtGui import QColor, QBrush
+    from PyQt5.QtCore import Qt, QPointF
+    al = spark.frac
+    sz = spark.size * al * 1.9
+    if sz < 0.5:
+        return
+    painter.setBrush(QBrush(QColor(248, 246, 240, int(al * 0.60 * 255))))
+    painter.setPen(Qt.NoPen)
+    painter.drawEllipse(QPointF(spark.x, spark.y), sz, sz)
+    painter.setBrush(QBrush(QColor(255, 255, 255, int(al * 0.32 * 255))))
+    painter.drawEllipse(QPointF(spark.x, spark.y), sz * 0.48, sz * 0.48)
+
+
+_mochi_mallet_game = _make_mallet_game(
+    ball_dark=(95, 72, 32), ball_main=(162, 125, 58),
+    ball_hl=(215, 185, 115, 160), ball_edge=(175, 138, 68, 180),
+    glow_rgb=(255, 215, 125))
+
+
+def _mochi_anvil_thumb_fn() -> Callable:
+    _MOCHI_CROP = (175, 194, 118, 96)   # (x, y, w, h) in widget coords
+
+    def draw(painter, w, h):
+        from types import SimpleNamespace
+        from PyQt5.QtGui import QPixmap, QPainter as _P
+        from PyQt5.QtCore import Qt, QRect
+        state = SimpleNamespace(
+            vcx=0.0, vcy=0.0, hide_anvil=False,
+            current_metal=None, current_chest=None, show_metal_forge=True,
+            active_anvil_skin="anvil_mochi", anvil_glow=0.0, heat_level=0.0,
+        )
+        pw, ph = int(_GAME_W * _SCALE), int(_GAME_H * _SCALE)
+        pix = QPixmap(pw, ph)
+        pix.fill(Qt.transparent)
+        p2 = _P(pix)
+        p2.setRenderHint(_P.Antialiasing)
+        p2.scale(_SCALE, _SCALE)
+        _mochi_anvil_game(p2, state)
+        p2.end()
+        cx2, cy2, cw2, ch2 = _MOCHI_CROP
+        cropped = pix.copy(QRect(cx2, cy2, cw2, ch2))
+        scaled  = cropped.scaled(w, h, Qt.KeepAspectRatio,
+                                 Qt.SmoothTransformation)
+        painter.drawPixmap((w - scaled.width())  // 2,
+                           (h - scaled.height()) // 2, scaled)
+    return draw
+
+
 # ── Register ──────────────────────────────────────────────────────────────────
-_register("anvil_woodfish", "木魚",   "anvil",  None,
+_register("anvil_woodfish", "木魚",   "anvil",  0,
           draw_thumb=_woodfish_thumb_fn(), draw_game=_woodfish_game,
           draw_spark=_wf_draw_spark, draw_ember=_wf_draw_ember,
           draw_material=_wf_draw_material)
-_register("hammer_mallet",       "木魚棍",   "hammer", None,
+_register("hammer_mallet",       "木魚棍",   "hammer", 0,
           draw_thumb=_mallet_thumb_fn(),
           draw_game=_mallet_game)
 _register("hammer_mallet_silver", "銀木魚棍", "hammer", 1,
@@ -615,3 +819,9 @@ _register("hammer_mallet_silver", "銀木魚棍", "hammer", 1,
 _register("hammer_mallet_gold",   "金木魚棍", "hammer", 2,
           draw_thumb=_mallet_thumb_fn(_gold_mallet_game, "hammer_mallet_gold"),
           draw_game=_gold_mallet_game)
+_register("anvil_mochi", "年糕臼", "anvil", 1,
+          draw_thumb=_mochi_anvil_thumb_fn(), draw_game=_mochi_anvil_game,
+          draw_spark=_mochi_draw_spark, draw_material=_mochi_draw_material)
+_register("hammer_mochi", "打糕錘", "hammer", 1,
+          draw_thumb=_mallet_thumb_fn(_mochi_mallet_game, "hammer_mochi"),
+          draw_game=_mochi_mallet_game)

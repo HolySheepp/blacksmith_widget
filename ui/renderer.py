@@ -479,13 +479,13 @@ def _draw_chest(painter: QPainter, state: GameState):
 
     # Shake: constant idle sway (scales with ratio) + hit burst
     t_now2 = getattr(state, 'play_time', 0.0)
-    idle_amp = chest.ratio * 1.8
+    idle_amp = chest.ratio * 4.2
     shake_x  = math.sin(t_now2 * 13.5) * idle_amp
     shake_y  = math.cos(t_now2 * 10.2) * idle_amp * 0.6
     if chest.shake_t > 0:
         intensity = min(1.0, chest.shake_t * 5) * chest.ratio
-        shake_x  += math.sin(t_now2 * 95) * 4.2 * intensity
-        shake_y  += math.cos(t_now2 * 75) * 2.5 * intensity
+        shake_x  += math.sin(t_now2 * 95) * 5.5 * intensity
+        shake_y  += math.cos(t_now2 * 75) * 3.2 * intensity
 
     # Effective dimensions (apply spawn + open scale)
     eff_scale = spawn_scale * open_scale
@@ -730,7 +730,14 @@ def _render_vcy_fast(state: GameState, cos_a: float, sin_a: float) -> float:
         m = getattr(state, 'current_metal', None)
         if (show_forge and not state.hide_anvil and m is not None and not m.dead
                 and m.spawn_t >= 1.0 and m.flash_t <= 0.0):
-            visual_top = FACE_TOP - m.thickness
+            if getattr(state, 'active_anvil_skin', None) == "anvil_woodfish":
+                # Karma orb: compute actual orb top from ratio (not flat thickness)
+                _ry   = 30.0
+                _hcy  = FACE_TOP - _ry - 20.0
+                _scy  = FACE_TOP + _ry * 0.6
+                visual_top = (_hcy + m.ratio * (_scy - _hcy)) - _ry
+            else:
+                visual_top = FACE_TOP - m.thickness
         else:
             visual_top = FACE_TOP
     if face_y > visual_top and FACE_L - 20 <= face_x <= FACE_R + 20:
