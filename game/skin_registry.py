@@ -289,10 +289,11 @@ def _wf_draw_ember(painter, ember):
 
 
 def _wf_draw_material(painter, state):
-    """'業力方塊' — dark karma block with a troubled face, replacing the metal bar.
-    Size / flash animation mirrors the original metal block logic exactly."""
+    """'業力怨靈' — a troubled karma spirit hovering above the slit.
+    Bottom at FACE_TOP (strike point); mallet beats it down into the fish.
+    Grows from a tiny dark seed into a heavy oppressive orb as m.ratio rises."""
     from PyQt5.QtGui import QColor, QBrush, QPen
-    from PyQt5.QtCore import Qt, QRectF, QPointF
+    from PyQt5.QtCore import Qt, QPointF, QRectF
     from config import AX, FACE_TOP
 
     m = getattr(state, 'current_metal', None)
@@ -309,16 +310,19 @@ def _wf_draw_material(painter, state):
     else:
         brightness, alpha = 0.0, 255
 
-    _FULL_W   = 215.0                   # mirrors _V2_TR_X - _V2_TL_X in renderer
-    thickness = m.thickness * spawn_scale
-    block_w   = (60.0 + (_FULL_W - 60.0) * m.ratio) * spawn_scale
-    mx = AX - block_w / 2
-    my = FACE_TOP - thickness
+    # Size: small worried seed → heavy karma orb
+    r_base = (16.0 + m.ratio * 40.0) * spawn_scale   # 16 → 56 game units radius
+    r_x    = r_base * 1.12   # slightly wider than tall
+    r_y    = r_base
 
-    # Colour: dark charcoal → deep indigo as quality/ratio rises
-    br = int(44 + m.ratio * 58)
-    bg = int(36 + m.ratio * 30)
-    bb = int(54 + m.ratio * 68)
+    # Position: bottom of orb rests at FACE_TOP, centred on AX
+    cx = float(AX)
+    cy = float(FACE_TOP) - r_y   # orb centre y
+
+    # Colour: dark charcoal → deep indigo-purple as karma accumulates
+    br = int(40 + m.ratio * 55)
+    bg = int(30 + m.ratio * 25)
+    bb = int(52 + m.ratio * 74)
     if brightness > 0:
         br = min(255, int(br + brightness * (255 - br)))
         bg = min(255, int(bg + brightness * (255 - bg)))
@@ -326,42 +330,57 @@ def _wf_draw_material(painter, state):
 
     painter.setPen(Qt.NoPen)
 
-    # Block body
+    # 1. Drop shadow
+    painter.setBrush(QBrush(QColor(0, 0, 0, int(alpha * 0.32))))
+    painter.drawEllipse(QPointF(cx + 3, cy + 5), r_x * 0.88, r_y * 0.55)
+
+    # 2. Outer aura — heavier karma = more oppressive halo
+    aura_a = int(alpha * (0.10 + m.ratio * 0.20))
+    painter.setBrush(QBrush(QColor(br, bg, bb, aura_a)))
+    painter.drawEllipse(QPointF(cx, cy), r_x * 1.30, r_y * 1.30)
+
+    # 3. Main orb body
     painter.setBrush(QBrush(QColor(br, bg, bb, alpha)))
-    painter.drawRoundedRect(QRectF(mx, my, block_w, thickness), 4, 4)
+    painter.drawEllipse(QPointF(cx, cy), r_x, r_y)
 
-    # Top-edge highlight
-    hl_h = max(2.0, thickness * 0.18)
+    # 4. Upper-left specular highlight
     painter.setBrush(QBrush(QColor(
-        min(255, br + 42), min(255, bg + 34), min(255, bb + 58), alpha)))
-    painter.drawRoundedRect(QRectF(mx + 2, my, block_w - 4, hl_h), 2, 2)
+        min(255, br + 58), min(255, bg + 46), min(255, bb + 72),
+        int(alpha * 0.50))))
+    painter.drawEllipse(QPointF(cx - r_x * 0.26, cy - r_y * 0.30),
+                        r_x * 0.40, r_y * 0.34)
 
-    # Troubled face — visible once the block is wide/tall enough
-    if block_w >= 56 and thickness >= 14 and alpha > 55:
-        face_cx = float(AX)
-        face_cy = my + thickness * 0.50
-        eye_col = QColor(min(255, br + 92), min(255, bg + 78),
-                         min(255, bb + 92), int(alpha * 0.80))
-        eye_r   = max(1.5, thickness * 0.065)
-        spread  = min(block_w * 0.13, 17.0)
+    # 5. Face — visible once orb is large enough
+    if r_base >= 18 and alpha > 50:
+        face_col = QColor(min(255, br + 108), min(255, bg + 90),
+                          min(255, bb + 108), int(alpha * 0.78))
+        eye_r  = max(1.3, r_base * 0.068)
+        spread = r_base * 0.30
+        eye_y  = cy - r_y * 0.08
 
         # Dot eyes
-        painter.setBrush(QBrush(eye_col))
-        painter.drawEllipse(
-            QPointF(face_cx - spread, face_cy - thickness * 0.06), eye_r, eye_r)
-        painter.drawEllipse(
-            QPointF(face_cx + spread, face_cy - thickness * 0.06), eye_r, eye_r)
+        painter.setBrush(QBrush(face_col))
+        painter.drawEllipse(QPointF(cx - spread, eye_y), eye_r, eye_r)
+        painter.drawEllipse(QPointF(cx + spread, eye_y), eye_r, eye_r)
 
-        # Frown (bottom arc: startAngle=0, spanAngle=-180*16 = clockwise through 6 o'clock)
-        frown_w = min(block_w * 0.20, 22.0)
-        frown_y = face_cy + thickness * 0.14
-        pen = QPen(eye_col, max(1.3, thickness * 0.068))
+        # Worried eyebrows (slope inward and downward)
+        brow_len = r_base * 0.20
+        brow_y   = eye_y - eye_r * 2.6
+        pen = QPen(face_col, max(1.1, r_base * 0.052))
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
+        painter.drawLine(
+            QPointF(cx - spread - brow_len * 0.5, brow_y - brow_len * 0.32),
+            QPointF(cx - spread + brow_len * 0.5, brow_y + brow_len * 0.32))
+        painter.drawLine(
+            QPointF(cx + spread + brow_len * 0.5, brow_y - brow_len * 0.32),
+            QPointF(cx + spread - brow_len * 0.5, brow_y + brow_len * 0.32))
+
+        # Frown (startAngle=0, spanAngle=-180*16 → clockwise through bottom)
+        fw = r_base * 0.46
+        fy = cy + r_y * 0.28
         painter.drawArc(
-            QRectF(face_cx - frown_w / 2, frown_y - frown_w * 0.28,
-                   frown_w, frown_w * 0.55),
+            QRectF(cx - fw / 2, fy - fw * 0.28, fw, fw * 0.56),
             0, -180 * 16)
         painter.setPen(Qt.NoPen)
 
