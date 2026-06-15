@@ -9,7 +9,7 @@ Modes:
 import math
 import random
 from save import load_save
-from game.metal import MetalPiece, pick_metal, METAL_TYPES, SPAWN_DUR, FLASH_DUR
+from game.metal import MetalPiece, pick_metal, METAL_TYPES, SPAWN_DUR, FLASH_DUR, MATERIAL_IDS
 from game.chest import (ChestPiece, pick_chest, pick_reward,
                         CHEST_SPAWN_DUR, CHEST_OPEN_DUR,
                         CHEST_WEIGHTS_DEFAULT, CHEST_HIT_MIN, CHEST_HIT_MAX)
@@ -274,13 +274,20 @@ class GameState:
         self.active_anvil_skin:  str | None = _sv.get("active_anvil_skin") or None
         self.active_hammer_skin: str | None = _sv.get("active_hammer_skin") or None
 
-        # Materials stockpile
-        _mat = _sv.get("materials", {})
-        self.materials: dict = {
-            "wood_scraps": int(_mat.get("wood_scraps", 0)),
-            "iron_scraps": int(_mat.get("iron_scraps", 0)),
-            "gold_dust":   int(_mat.get("gold_dust",   0)),
-        }
+        # Materials stockpile — keyed by MATERIAL_IDS ("破銅","爛鐵","鐵","鋼","精金").
+        # Old saves used invented names (wood_scraps / iron_scraps / gold_dust);
+        # migrate them so no collected materials are lost.
+        _OLD_MAT_MAP = {"wood_scraps": "破銅", "iron_scraps": "鐵", "gold_dust": "精金"}
+        _mat_raw = _sv.get("materials", {})
+        _mat_migrated: dict = {}
+        for _k, _v in _mat_raw.items():
+            _nk = _OLD_MAT_MAP.get(_k, _k)
+            _mat_migrated[_nk] = _mat_migrated.get(_nk, 0) + int(_v)
+        self.materials: dict = {mid: int(_mat_migrated.get(mid, 0)) for mid in MATERIAL_IDS}
+
+        # First-chest guarantee: new players get a chest at exactly hit 1000
+        _default_fcg = int(_sv.get("hit_count", 0)) >= 1000
+        self.first_chest_granted: bool = bool(_sv.get("first_chest_granted", _default_fcg))
 
         # Transient: notifies widget to show a reward toast (cleared after read)
         self.last_chest_reward: dict | None = None
@@ -545,6 +552,7 @@ class GameState:
             "active_anvil_skin":       self.active_anvil_skin,
             "active_hammer_skin":      self.active_hammer_skin,
             "materials":               dict(self.materials),
+            "first_chest_granted":     self.first_chest_granted,
             "current_chest_save":      self._chest_to_save(),
             "art_mode":                self.art_mode,
             "art_drag_px":             self.art_drag_px,
@@ -663,7 +671,8 @@ class GameState:
         self.owned_skins           = set()
         self.active_anvil_skin     = None
         self.active_hammer_skin    = None
-        self.materials             = {"wood_scraps": 0, "iron_scraps": 0, "gold_dust": 0}
+        self.materials             = {mid: 0 for mid in MATERIAL_IDS}
+        self.first_chest_granted   = False
         self.last_chest_reward     = None
         self._force_next_item      = None
         self.current_chest         = None
@@ -833,6 +842,18 @@ class GameState:
         self.hit_cooldown = 380.0
         self.hit_count   += 1
         self.chest_hits_since_last += 1   # always count toward next chest
+
+        # First-chest guarantee: player who has never opened a chest gets one at hit 1000
+        if (not self.first_chest_granted
+                and self.hit_count == 1000
+                and self.current_chest is None):
+            self.first_chest_granted = True
+            _w = [self.chest_wood_weight, self.chest_iron_weight, self.chest_gold_weight]
+            _tier = pick_chest(_w)
+            if self.current_metal is None:
+                self.current_chest = ChestPiece(_tier)
+            else:
+                self._force_next_item = f"chest_{_tier}"
 
         if self.kb_mode == "charge":
             self.typing_cooldown = 120.0          # short cooldown — just enough for visual

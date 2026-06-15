@@ -289,11 +289,10 @@ def _wf_draw_ember(painter, ember):
 
 
 def _wf_draw_material(painter, state):
-    """'業力怨靈' — a troubled karma spirit hovering above the slit.
-    Bottom at FACE_TOP (strike point); mallet beats it down into the fish.
-    Grows from a tiny dark seed into a heavy oppressive orb as m.ratio rises."""
+    """'業力怨靈' — a troubled karma spirit being knocked into the fish's slit.
+    Fixed size; each strike pushes it deeper until fully absorbed into the wood."""
     from PyQt5.QtGui import QColor, QBrush, QPen
-    from PyQt5.QtCore import Qt, QPointF, QRectF
+    from PyQt5.QtCore import Qt, QPointF, QRectF, QRect
     from config import AX, FACE_TOP
 
     m = getattr(state, 'current_metal', None)
@@ -303,6 +302,8 @@ def _wf_draw_material(painter, state):
     if spawn_scale <= 0.01:
         return
 
+    painter.save()
+
     if m.flash_t > 0.0:
         brightness = (m.flash_t / 0.3) if m.flash_t < 0.3 else 0.0
         alpha      = 255 if m.flash_t < 0.3 else max(
@@ -310,14 +311,19 @@ def _wf_draw_material(painter, state):
     else:
         brightness, alpha = 0.0, 255
 
-    # Size: small worried seed → heavy karma orb
-    r_base = (16.0 + m.ratio * 40.0) * spawn_scale   # 16 → 56 game units radius
-    r_x    = r_base * 1.12   # slightly wider than tall
+    # Fixed size — only the position changes, not the radius
+    r_base = 30.0 * spawn_scale
+    r_x    = r_base * 1.12
     r_y    = r_base
 
-    # Position: bottom of orb rests at FACE_TOP, centred on AX
+    # Sinks from hovering above the slit → mostly submerged below it
+    hover_cy    = float(FACE_TOP) - r_y - 20.0   # ratio=0: floating 20px above slit
+    submerge_cy = float(FACE_TOP) + r_y * 0.6    # ratio=1: mostly inside the fish
     cx = float(AX)
-    cy = float(FACE_TOP) - r_y   # orb centre y
+    cy = hover_cy + m.ratio * (submerge_cy - hover_cy)
+
+    # Clip so the portion that has sunk below the slit is hidden
+    painter.setClipRect(QRect(0, 0, 800, int(FACE_TOP) + 2))
 
     # Colour: dark charcoal → deep indigo-purple as karma accumulates
     br = int(40 + m.ratio * 55)
@@ -384,139 +390,148 @@ def _wf_draw_material(painter, state):
             0, -180 * 16)
         painter.setPen(Qt.NoPen)
 
+    painter.restore()
 
-def _mallet_game(painter, state):
-    """Draw a wooden mallet (木魚棍) replacing the hammer.
-    Ball centre at p(HEAD_OFFSET, 0), radius = HEAD_PERP — bottom of ball
-    lands at p(HEAD_OFFSET, HEAD_PERP), matching _render_vcy_fast clamping."""
-    import math
-    from PyQt5.QtGui import QColor, QBrush, QPen
-    from PyQt5.QtCore import Qt, QPointF
-    from config import (HEAD_OFFSET, HEAD_PERP, GRIP_TO_BUTT, HL,
-                        FACE_TOP, get_charge_color)
-    from ui.renderer import _poly, _render_vcy_fast
 
-    a     = state.hammer_angle()
-    cos_a = math.cos(a)
-    sin_a = math.sin(a)
-    rvcy  = _render_vcy_fast(state, cos_a, sin_a)
-    vcx   = state.vcx
+def _make_mallet_game(ball_dark, ball_main, ball_hl, ball_edge, glow_rgb=(255, 102, 0)):
+    """Factory: returns a draw_game function for a mallet with the given ball colours.
+    The wooden handle is always the same; only the ball material changes."""
+    def _draw(painter, state):
+        import math
+        from PyQt5.QtGui import QColor, QBrush, QPen
+        from PyQt5.QtCore import Qt, QPointF
+        from config import (HEAD_OFFSET, HEAD_PERP, GRIP_TO_BUTT,
+                            FACE_TOP, get_charge_color)
+        from ui.renderer import _poly, _render_vcy_fast
 
-    def p(along, perp):
-        return (vcx  + along * cos_a + perp * sin_a,
-                rvcy + along * sin_a - perp * cos_a)
+        a     = state.hammer_angle()
+        cos_a = math.cos(a)
+        sin_a = math.sin(a)
+        rvcy  = _render_vcy_fast(state, cos_a, sin_a)
+        vcx   = state.vcx
 
-    ball_r    = float(HEAD_PERP)          # 30 — bottom of ball = strike face
-    stick_end = HEAD_OFFSET - ball_r + 5  # stick overlaps ball base slightly
+        def p(along, perp):
+            return (vcx  + along * cos_a + perp * sin_a,
+                    rvcy + along * sin_a - perp * cos_a)
 
-    painter.setPen(Qt.NoPen)
+        ball_r    = float(HEAD_PERP)
+        stick_end = HEAD_OFFSET - ball_r + 5
 
-    # ── Charge pulse rings (same shape as ball) ───────────────────────────────
-    for pulse in state.charge_pulses:
-        t  = pulse["t"]
-        m  = t * 20
-        al = (1 - t) ** 1.4 * 0.9
-        if al < 0.015:
-            continue
-        col = get_charge_color(pulse["cf"])
-        bx, by = p(HEAD_OFFSET, 0)
-        r_ring  = ball_r + m
-        pen = QPen(QColor(col[0], col[1], col[2], int(al * 255)))
-        pen.setWidthF(max(0.5, 2.2 - t * 1.4))
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(QPointF(bx, by), r_ring, r_ring)
         painter.setPen(Qt.NoPen)
 
-    # ── Handle (stick) ────────────────────────────────────────────────────────
-    # Dark base layer
-    painter.setBrush(QBrush(QColor(100, 60, 20)))
-    painter.drawPolygon(_poly([
-        p(-GRIP_TO_BUTT, -6), p(-GRIP_TO_BUTT, 6),
-        p(stick_end,      6), p(stick_end,     -6),
-    ]))
-    # Light top highlight
-    painter.setBrush(QBrush(QColor(148, 95, 38)))
-    painter.drawPolygon(_poly([
-        p(-GRIP_TO_BUTT, -6), p(-GRIP_TO_BUTT, -2),
-        p(stick_end,     -2), p(stick_end,     -6),
-    ]))
-    # Grain highlight strip
-    painter.setBrush(QBrush(QColor(165, 108, 50)))
-    painter.drawPolygon(_poly([
-        p(-GRIP_TO_BUTT + 4, -4), p(-GRIP_TO_BUTT + 4, -1),
-        p(stick_end - 2,     -1), p(stick_end - 2,     -4),
-    ]))
+        # ── Charge pulse rings ────────────────────────────────────────────────
+        for pulse in state.charge_pulses:
+            t  = pulse["t"]
+            m2 = t * 20
+            al = (1 - t) ** 1.4 * 0.9
+            if al < 0.015:
+                continue
+            col = get_charge_color(pulse["cf"])
+            bx, by = p(HEAD_OFFSET, 0)
+            r_ring = ball_r + m2
+            pen = QPen(QColor(col[0], col[1], col[2], int(al * 255)))
+            pen.setWidthF(max(0.5, 2.2 - t * 1.4))
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QPointF(bx, by), r_ring, r_ring)
+            painter.setPen(Qt.NoPen)
 
-    # Grip wraps (dark leather)
-    painter.setBrush(QBrush(QColor(58, 28, 10, 140)))
-    for al in range(5, 36, 12):
+        # ── Handle (stick) ────────────────────────────────────────────────────
+        painter.setBrush(QBrush(QColor(100, 60, 20)))
         painter.drawPolygon(_poly([
-            p(al, -6), p(al + 5, -6), p(al + 5, 6), p(al, 6),
+            p(-GRIP_TO_BUTT, -6), p(-GRIP_TO_BUTT, 6),
+            p(stick_end,      6), p(stick_end,     -6),
+        ]))
+        painter.setBrush(QBrush(QColor(148, 95, 38)))
+        painter.drawPolygon(_poly([
+            p(-GRIP_TO_BUTT, -6), p(-GRIP_TO_BUTT, -2),
+            p(stick_end,     -2), p(stick_end,     -6),
+        ]))
+        painter.setBrush(QBrush(QColor(165, 108, 50)))
+        painter.drawPolygon(_poly([
+            p(-GRIP_TO_BUTT + 4, -4), p(-GRIP_TO_BUTT + 4, -1),
+            p(stick_end - 2,     -1), p(stick_end - 2,     -4),
+        ]))
+        painter.setBrush(QBrush(QColor(58, 28, 10, 140)))
+        for al in range(5, 36, 12):
+            painter.drawPolygon(_poly([
+                p(al, -6), p(al + 5, -6), p(al + 5, 6), p(al, 6),
+            ]))
+        painter.setBrush(QBrush(QColor(74, 74, 74)))
+        painter.drawPolygon(_poly([
+            p(-GRIP_TO_BUTT - 3, -7), p(-GRIP_TO_BUTT + 2, -7),
+            p(-GRIP_TO_BUTT + 2,  7), p(-GRIP_TO_BUTT - 3,  7),
         ]))
 
-    # Butt cap
-    painter.setBrush(QBrush(QColor(74, 74, 74)))
-    painter.drawPolygon(_poly([
-        p(-GRIP_TO_BUTT - 3, -7), p(-GRIP_TO_BUTT + 2, -7),
-        p(-GRIP_TO_BUTT + 2,  7), p(-GRIP_TO_BUTT - 3,  7),
-    ]))
+        # ── Ball ──────────────────────────────────────────────────────────────
+        bx, by = p(HEAD_OFFSET, 0)
+        dr, dg, db     = ball_dark
+        mr, mg, mb     = ball_main
+        hr, hg, hb, ha = ball_hl
+        er, eg, eb, ea = ball_edge
+        gr, gg, gb     = glow_rgb
 
-    # ── Ball ──────────────────────────────────────────────────────────────────
-    bx, by = p(HEAD_OFFSET, 0)
-
-    # Drop shadow
-    painter.setBrush(QBrush(QColor(0, 0, 0, 55)))
-    painter.drawEllipse(QPointF(bx + 3, by + 3), ball_r, ball_r)
-
-    # Dark underside
-    painter.setBrush(QBrush(QColor(75, 44, 14)))
-    painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
-
-    # Main ball colour
-    painter.setBrush(QBrush(QColor(118, 74, 26)))
-    painter.drawEllipse(QPointF(bx - 2, by - 2), ball_r * 0.90, ball_r * 0.90)
-
-    # Top-left specular highlight
-    painter.setBrush(QBrush(QColor(175, 118, 50, 160)))
-    painter.drawEllipse(QPointF(bx - ball_r * 0.28, by - ball_r * 0.28),
-                        ball_r * 0.38, ball_r * 0.34)
-
-    # Outer edge line
-    painter.setPen(QPen(QColor(155, 100, 42, 180), 1.5))
-    painter.setBrush(Qt.NoBrush)
-    painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
-    painter.setPen(Qt.NoPen)
-
-    # ── Proximity heat glow on ball ───────────────────────────────────────────
-    prox = max(0.0, 1.0 - max(0.0, FACE_TOP - state.vcy) / 120.0)
-    if prox > 0.01:
-        painter.setBrush(QBrush(QColor(255, 102, 0, int(prox * 0.55 * 255))))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 55)))
+        painter.drawEllipse(QPointF(bx + 3, by + 3), ball_r, ball_r)
+        painter.setBrush(QBrush(QColor(dr, dg, db)))
         painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
-        if prox > 0.5:
-            painter.setBrush(QBrush(
-                QColor(255, 255, 255, int((prox - 0.5) * 0.28 * 255))))
-            painter.drawEllipse(QPointF(bx, by), ball_r * 0.6, ball_r * 0.6)
-
-    # ── Charge fill on ball ───────────────────────────────────────────────────
-    cf = (state.typing_charge / max(1, state.typing_max_charge)
-          if state.kb_mode == "charge" else 0.0)
-    if cf > 0:
-        col = get_charge_color(cf)
-        gm  = cf * 6
-        painter.setBrush(QBrush(QColor(col[0], col[1], col[2],
-                                       int((0.08 + cf * 0.20) * 255))))
-        painter.drawEllipse(QPointF(bx, by), ball_r + gm, ball_r + gm)
-        painter.setBrush(QBrush(QColor(col[0], col[1], col[2],
-                                       int((0.18 + cf * 0.60) * 255))))
-        painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
-        pen2 = QPen(QColor(col[0], col[1], col[2],
-                           int((0.75 + cf * 0.22) * 255)))
-        pen2.setWidthF(1.5)
-        painter.setPen(pen2)
+        painter.setBrush(QBrush(QColor(mr, mg, mb)))
+        painter.drawEllipse(QPointF(bx - 2, by - 2), ball_r * 0.90, ball_r * 0.90)
+        painter.setBrush(QBrush(QColor(hr, hg, hb, ha)))
+        painter.drawEllipse(QPointF(bx - ball_r * 0.28, by - ball_r * 0.28),
+                            ball_r * 0.38, ball_r * 0.34)
+        painter.setPen(QPen(QColor(er, eg, eb, ea), 1.5))
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
         painter.setPen(Qt.NoPen)
+
+        # ── Proximity glow ────────────────────────────────────────────────────
+        prox = max(0.0, 1.0 - max(0.0, FACE_TOP - state.vcy) / 120.0)
+        if prox > 0.01:
+            painter.setBrush(QBrush(QColor(gr, gg, gb, int(prox * 0.55 * 255))))
+            painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
+            if prox > 0.5:
+                painter.setBrush(QBrush(
+                    QColor(255, 255, 255, int((prox - 0.5) * 0.28 * 255))))
+                painter.drawEllipse(QPointF(bx, by), ball_r * 0.6, ball_r * 0.6)
+
+        # ── Charge fill ───────────────────────────────────────────────────────
+        cf = (state.typing_charge / max(1, state.typing_max_charge)
+              if state.kb_mode == "charge" else 0.0)
+        if cf > 0:
+            col = get_charge_color(cf)
+            gm  = cf * 6
+            painter.setBrush(QBrush(QColor(col[0], col[1], col[2],
+                                           int((0.08 + cf * 0.20) * 255))))
+            painter.drawEllipse(QPointF(bx, by), ball_r + gm, ball_r + gm)
+            painter.setBrush(QBrush(QColor(col[0], col[1], col[2],
+                                           int((0.18 + cf * 0.60) * 255))))
+            painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
+            pen2 = QPen(QColor(col[0], col[1], col[2],
+                               int((0.75 + cf * 0.22) * 255)))
+            pen2.setWidthF(1.5)
+            painter.setPen(pen2)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QPointF(bx, by), ball_r, ball_r)
+            painter.setPen(Qt.NoPen)
+
+    return _draw
+
+
+_mallet_game        = _make_mallet_game(
+    ball_dark=(75, 44, 14), ball_main=(118, 74, 26),
+    ball_hl=(175, 118, 50, 160), ball_edge=(155, 100, 42, 180),
+    glow_rgb=(255, 102, 0))
+
+_silver_mallet_game = _make_mallet_game(
+    ball_dark=(68, 78, 92), ball_main=(135, 150, 168),
+    ball_hl=(200, 218, 235, 160), ball_edge=(158, 175, 195, 180),
+    glow_rgb=(170, 195, 220))
+
+_gold_mallet_game   = _make_mallet_game(
+    ball_dark=(115, 85, 15), ball_main=(192, 155, 32),
+    ball_hl=(248, 220, 85, 160), ball_edge=(210, 175, 48, 180),
+    glow_rgb=(255, 198, 40))
 
 
 # ── Thumbnail factories (offscreen render → crop → scale) ─────────────────────
@@ -552,9 +567,11 @@ def _woodfish_thumb_fn() -> Callable:
     return draw
 
 
-def _mallet_thumb_fn() -> Callable:
+def _mallet_thumb_fn(game_fn=None, skin_id="hammer_mallet") -> Callable:
+    if game_fn is None:
+        game_fn = _mallet_game
+
     def draw(painter, w, h):
-        import math
         from types import SimpleNamespace
         from PyQt5.QtGui import QPixmap, QPainter as _P
         from PyQt5.QtCore import Qt, QRect
@@ -563,7 +580,7 @@ def _mallet_thumb_fn() -> Callable:
             vcx=float(KB_X), vcy=float(_HAMMER_VCY),
             hammer_angle=lambda: IDLE_ANGLE,
             kb_mode="normal", typing_charge=0, typing_max_charge=5,
-            charge_pulses=[], active_hammer_skin="hammer_mallet",
+            charge_pulses=[], active_hammer_skin=skin_id,
             play_time=0.0, hide_anvil=False,
             current_metal=None, current_chest=None, show_metal_forge=True,
         )
@@ -573,7 +590,7 @@ def _mallet_thumb_fn() -> Callable:
         p2 = _P(pix)
         p2.setRenderHint(_P.Antialiasing)
         p2.scale(_SCALE, _SCALE)
-        _mallet_game(p2, state)
+        game_fn(p2, state)
         p2.end()
         cx, cy, cw, ch = _HAMMER_CROP
         cropped = pix.copy(QRect(cx, cy, cw, ch))
@@ -589,5 +606,12 @@ _register("anvil_woodfish", "木魚",   "anvil",  None,
           draw_thumb=_woodfish_thumb_fn(), draw_game=_woodfish_game,
           draw_spark=_wf_draw_spark, draw_ember=_wf_draw_ember,
           draw_material=_wf_draw_material)
-_register("hammer_mallet",  "木魚棍", "hammer", None,
-          draw_thumb=_mallet_thumb_fn(),  draw_game=_mallet_game)
+_register("hammer_mallet",       "木魚棍",   "hammer", None,
+          draw_thumb=_mallet_thumb_fn(),
+          draw_game=_mallet_game)
+_register("hammer_mallet_silver", "銀木魚棍", "hammer", 1,
+          draw_thumb=_mallet_thumb_fn(_silver_mallet_game, "hammer_mallet_silver"),
+          draw_game=_silver_mallet_game)
+_register("hammer_mallet_gold",   "金木魚棍", "hammer", 2,
+          draw_thumb=_mallet_thumb_fn(_gold_mallet_game, "hammer_mallet_gold"),
+          draw_game=_gold_mallet_game)

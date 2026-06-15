@@ -15,6 +15,23 @@ from PyQt5.QtGui   import QPainter, QColor, QBrush, QPen, QFont, QPixmap
 
 from game.skin_registry import SKIN_REGISTRY, SkinDef
 
+# ── Rarity colours (match chest glow_color palette) ──────────────────────────
+_TIER_BORDER = {
+    0: (185, 128,  68),   # wood — warm brown
+    1: (158, 182, 210),   # iron — silver-blue
+    2: (228, 188,  44),   # gold — bright gold
+}
+_TIER_BORDER_ACTIVE = {
+    0: (218, 158,  90),
+    1: (192, 215, 238),
+    2: (255, 220,  70),
+}
+_TIER_FILL_ACTIVE = {
+    0: (185, 128,  68, 48),
+    1: (158, 182, 210, 48),
+    2: (228, 188,  44, 52),
+}
+
 # ── Card geometry ──────────────────────────────────────────────────────────────
 CARD_W  = 88
 CARD_H  = 100
@@ -84,16 +101,38 @@ class SkinCard(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
+        # Rarity tier for this skin (None for default / free skins)
+        sd   = SKIN_REGISTRY.get(self.skin_id)
+        tier = sd.chest_tier if sd else None
+
         # ── Background & border ───────────────────────────────────────────────
         if self.active:
-            p.setBrush(QBrush(QColor(255, 215, 55, 55)))
-            p.setPen(QPen(QColor(220, 178, 20), 2.5))
+            if tier is not None:
+                fr, fg, fb, fa = _TIER_FILL_ACTIVE[tier]
+                br2, bg2, bb2  = _TIER_BORDER_ACTIVE[tier]
+                p.setBrush(QBrush(QColor(fr, fg, fb, fa)))
+                p.setPen(QPen(QColor(br2, bg2, bb2), 2.5))
+            else:
+                p.setBrush(QBrush(QColor(255, 215, 55, 55)))
+                p.setPen(QPen(QColor(220, 178, 20), 2.5))
         elif not self.owned:
-            p.setBrush(QBrush(QColor(36, 36, 38)))
-            p.setPen(QPen(QColor(65, 65, 68), 1.5))
+            # Locked: dark bg, but still show tier border (dim) so rarity is visible
+            if tier is not None:
+                br2, bg2, bb2 = _TIER_BORDER[tier]
+                p.setBrush(QBrush(QColor(36, 36, 38)))
+                p.setPen(QPen(QColor(br2, bg2, bb2, 110), 1.5))
+            else:
+                p.setBrush(QBrush(QColor(36, 36, 38)))
+                p.setPen(QPen(QColor(65, 65, 68), 1.5))
         else:
-            p.setBrush(QBrush(QColor(50, 50, 54)))
-            p.setPen(QPen(QColor(88, 88, 92), 1.5))
+            # Owned but not active
+            if tier is not None:
+                br2, bg2, bb2 = _TIER_BORDER[tier]
+                p.setBrush(QBrush(QColor(50, 50, 54)))
+                p.setPen(QPen(QColor(br2, bg2, bb2, 170), 1.5))
+            else:
+                p.setBrush(QBrush(QColor(50, 50, 54)))
+                p.setPen(QPen(QColor(88, 88, 92), 1.5))
         p.drawRoundedRect(1, 1, CARD_W - 2, CARD_H - 2, 8, 8)
 
         # ── Thumbnail (centred in drawing canvas) ─────────────────────────────
@@ -116,10 +155,15 @@ class SkinCard(QWidget):
 
         # ── Active checkmark badge ────────────────────────────────────────────
         if self.active:
+            if tier is not None:
+                _br2, _bg2, _bb2 = _TIER_BORDER_ACTIVE[tier]
+                badge_col = QColor(_br2, _bg2, _bb2)
+            else:
+                badge_col = QColor(220, 178, 20)
             p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(QColor(220, 178, 20)))
+            p.setBrush(QBrush(badge_col))
             p.drawEllipse(CARD_W - 20, 4, 16, 16)
-            p.setPen(QPen(QColor(30, 22, 5), 2.2,
+            p.setPen(QPen(QColor(25, 18, 5), 2.2,
                           Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
             p.drawLine(CARD_W - 17, 12, CARD_W - 13, 16)
             p.drawLine(CARD_W - 13, 16, CARD_W -  7,  8)

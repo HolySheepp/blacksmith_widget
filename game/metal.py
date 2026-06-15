@@ -11,21 +11,31 @@ Quality unit = same as force_count increment
 import random
 
 # ── Metal type definitions ─────────────────────────────────────────────────────
+# mat_id = the ID used in the materials inventory (state.materials dict).
+# To reference a material elsewhere (e.g. chest drops), use mat_id — never
+# hard-code the display name, as it may change for localisation.
 
 METAL_TYPES = [
     # hot_color = 剛生成時（高溫），cold_color = 鍛造完成時（冷卻）
     # 熱色五種特意拉開：極暗紅 / 銅棕 / 亮橙紅 / 琥珀黃橙 / 金黃，讓玩家一眼辨識
-    {"name": "破銅", "number": 1, "quality_max":  10, "weight": 40,
+    {"name": "破銅", "mat_id": "破銅", "number": 1, "quality_max":  10, "weight": 40,
      "hot_color": (208, 112, 46), "cold_color": (172,  96,  48)},  # 銅棕（G偏高→偏棕）
-    {"name": "爛鐵", "number": 2, "quality_max":  20, "weight": 30,
+    {"name": "爛鐵", "mat_id": "爛鐵", "number": 2, "quality_max":  20, "weight": 30,
      "hot_color": (155,  30,  5), "cold_color": ( 85,  82,  88)},  # 極暗暗紅（最低品質）
-    {"name": "鐵",   "number": 3, "quality_max":  40, "weight": 20,
+    {"name": "鐵",   "mat_id": "鐵",   "number": 3, "quality_max":  40, "weight": 20,
      "hot_color": (252,  88, 10), "cold_color": (118, 120, 130)},  # 純亮橙紅（基準）
-    {"name": "鋼",   "number": 4, "quality_max":  70, "weight":  7,
+    {"name": "鋼",   "mat_id": "鋼",   "number": 4, "quality_max":  70, "weight":  7,
      "hot_color": (240, 140, 18), "cold_color": ( 92, 110, 148)},  # 琥珀黃橙（明顯偏黃）
-    {"name": "精金", "number": 5, "quality_max": 100, "weight":  3,
+    {"name": "精金", "mat_id": "精金", "number": 5, "quality_max": 100, "weight":  3,
      "hot_color": (255, 218, 52), "cold_color": (228, 196,  90)},  # 金黃（最明顯）
 ]
+
+# ── Material inventory IDs ─────────────────────────────────────────────────────
+# Single source of truth for all collectible materials in the game.
+# Chest fallback drops, inventory display, and state.materials all reference
+# these IDs.  To add a new material: add it to METAL_TYPES above.
+MATERIAL_IDS    = [m["mat_id"] for m in METAL_TYPES]   # ["破銅","爛鐵","鐵","鋼","精金"]
+MATERIAL_LABELS = {m["mat_id"]: m["name"] for m in METAL_TYPES}
 
 # ── Visual constants ───────────────────────────────────────────────────────────
 

@@ -477,13 +477,15 @@ def _draw_chest(painter: QPainter, state: GameState):
         alpha      = 255
         open_scale = 1.0
 
-    # Shake offset (when shake_t > 0 — each hit)
-    shake_x = shake_y = 0.0
+    # Shake: constant idle sway (scales with ratio) + hit burst
+    t_now2 = getattr(state, 'play_time', 0.0)
+    idle_amp = chest.ratio * 1.8
+    shake_x  = math.sin(t_now2 * 13.5) * idle_amp
+    shake_y  = math.cos(t_now2 * 10.2) * idle_amp * 0.6
     if chest.shake_t > 0:
-        t = getattr(state, 'play_time', 0.0)
         intensity = min(1.0, chest.shake_t * 5) * chest.ratio
-        shake_x = math.sin(t * 95)  * 3.5 * intensity
-        shake_y = math.cos(t * 75)  * 2.0 * intensity
+        shake_x  += math.sin(t_now2 * 95) * 4.2 * intensity
+        shake_y  += math.cos(t_now2 * 75) * 2.5 * intensity
 
     # Effective dimensions (apply spawn + open scale)
     eff_scale = spawn_scale * open_scale
@@ -500,8 +502,8 @@ def _draw_chest(painter: QPainter, state: GameState):
     painter.setPen(Qt.NoPen)
 
     # ── Glow rays (drawn first, behind the chest box) ─────────────────────
-    t_now = getattr(state, 'play_time', 0.0)
-    N_RAYS   = 10
+    t_now = t_now2   # alias already computed above
+    N_RAYS   = 12
     center_x = AX + shake_x
     center_y = FACE_TOP - ch / 2 + shake_y
     glow_alpha_base = int((0.4 + 0.35 * math.sin(t_now * 3.8)) * 255)
@@ -510,7 +512,7 @@ def _draw_chest(painter: QPainter, state: GameState):
     for i in range(N_RAYS):
         angle   = t_now * 0.65 + i * (math.pi * 2 / N_RAYS)
         pulse   = 0.55 + 0.45 * math.sin(t_now * 3.2 + i * 0.7)
-        ray_len = (14 + pulse * 22) * eff_scale
+        ray_len = (28 + pulse * 50) * eff_scale   # longer rays
         ray_al  = int(glow_alpha_base * pulse)
         if ray_al < 10:
             continue

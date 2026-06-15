@@ -28,8 +28,8 @@ CHEST_TYPES = [
         "strap_color": (100,  65,  30),   # dark leather straps
         "lock_color":  (185, 148,  42),   # brass lock
         "glow_color":  (210, 165,  85),   # warm amber glow
-        "mat_type":    "wood_scraps",
-        "mat_range":   (10, 20),
+        "mat_type":    "破銅",            # fallback drop (MATERIAL_IDS[0])
+        "mat_range":   (8, 18),
     },
     {   # 1 — Iron
         "name":       "鐵寶箱",
@@ -40,7 +40,7 @@ CHEST_TYPES = [
         "strap_color": ( 88,  96, 105),   # dark iron straps
         "lock_color":  (215, 220, 225),   # silver lock
         "glow_color":  (175, 210, 245),   # cool blue-silver glow
-        "mat_type":    "iron_scraps",
+        "mat_type":    "鐵",              # fallback drop (MATERIAL_IDS[2])
         "mat_range":   (5, 12),
     },
     {   # 2 — Gold
@@ -52,7 +52,7 @@ CHEST_TYPES = [
         "strap_color": (145, 112,  10),   # dark gold straps
         "lock_color":  (255, 232,  80),   # bright gold lock
         "glow_color":  (255, 215,  50),   # brilliant gold glow
-        "mat_type":    "gold_dust",
+        "mat_type":    "精金",            # fallback drop (MATERIAL_IDS[4])
         "mat_range":   (3, 6),
     },
 ]
