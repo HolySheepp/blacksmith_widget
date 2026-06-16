@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, QRegExp
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QListWidget, QListWidgetItem,
-    QFrame, QCheckBox, QSizePolicy, QWidget,
+    QFrame, QCheckBox,
 )
 from PyQt5.QtGui import QRegExpValidator, QIntValidator
 

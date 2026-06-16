@@ -507,7 +507,7 @@ def _draw_chest(painter: QPainter, state: GameState):
         tip_x  = center_x + math.cos(angle) * (cw / 2 + 3 + ray_len)
         tip_y  = center_y + math.sin(angle) * (ch / 2 + 3 + ray_len)
         pen = QPen(QColor(glow_r, glow_g, glow_b, ray_al))
-        pen.setWidthF(max(0.8, 2.0 * eff_scale - t_now * 0.1 % 0.5))
+        pen.setWidthF(max(0.8, 2.0 * eff_scale - (t_now * 0.1 % 0.5)))
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         painter.drawLine(QPointF(edge_x, edge_y), QPointF(tip_x, tip_y))

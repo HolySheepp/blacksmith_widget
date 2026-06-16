@@ -21,11 +21,10 @@ from PyQt5.QtGui     import (QPainter, QColor, QPen, QBrush, QFont,
                              QPainterPath, QPixmap, QTransform)
 
 from config import (
-    AX, AY_BASE, FACE_TOP, FACE_L, FACE_R,
+    AX, FACE_TOP,
     KB_X, KB_Y, MAX_VCY, APPROACH_DIST,
     IDLE_ANGLE, SWING_ANGLE,
     HEAD_OFFSET, HEAD_PERP,
-    HL, HR, HP,
 )
 from game.state  import Spark
 from ui.renderer import draw_frame

@@ -233,8 +233,8 @@ class GameState:
         except Exception:
             self.forge_counts: list = [0] * len(METAL_TYPES)
         # 恢復上次未完成的金屬塊（包含進度），否則等第一次敲擊後再生成
-        # 金屬鍛造關閉時跳過恢復，直接清空
-        _cm_save = _sv.get("current_metal_save") if self.show_metal_forge else None
+        # 即使 show_metal_forge=False 也保留進度，功能重新開啟後繼續
+        _cm_save = _sv.get("current_metal_save")
         if _cm_save is not None:
             try:
                 _m = MetalPiece(int(_cm_save["type_idx"]))
@@ -290,7 +290,7 @@ class GameState:
         self._force_next_item: str | None = None
 
         # Current chest (restored from save if present)
-        _cc_save = _sv.get("current_chest_save") if self.show_metal_forge else None
+        _cc_save = _sv.get("current_chest_save")
         if _cc_save is not None:
             try:
                 _c = ChestPiece(int(_cc_save["chest_type"]))
