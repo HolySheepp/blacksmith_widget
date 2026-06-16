@@ -1507,12 +1507,17 @@ class BlacksmithWidget(QWidget):
         """連線失敗（非重試斷線）——若為自動重連嘗試，顯示氣泡通知。"""
         if self._auto_rejoin_pending:
             self._auto_rejoin_pending = False
-            note = ("連線失敗，無法加入上次遊玩所在房間，"
-                    "請檢查網路連線，目前為單人模式")
-            if self._tray is not None:
-                self._tray.showMessage(
-                    "鐵匠鋪小工具", note,
-                    QSystemTrayIcon.Warning, 6000)
+            if not self._auto_recon_active:
+                # 啟動時第一次連線失敗 → 啟動每分鐘重試，與被迫斷線行為一致
+                if self._tray is not None:
+                    self._tray.showMessage(
+                        "🔌  無法連線",
+                        "無法連線到伺服器，將每分鐘自動嘗試重新連接",
+                        QSystemTrayIcon.Warning, 6000)
+                self._auto_recon_active   = True
+                self._auto_recon_attempts = 0
+                self._auto_recon_timer.start()
+            # 若已在 auto_recon 模式中（tick 觸發的重試失敗）→ 靜默，計數由 tick 管理
 
     def _on_net_disconnected(self, reason: str):
         """伺服器斷線（重試 3 次失敗）時，清除 peer widgets 和輸入框。
