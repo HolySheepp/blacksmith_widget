@@ -12,7 +12,6 @@ import pathlib
 import subprocess
 import sys
 import threading
-import time
 
 from PyQt5.QtWidgets import (QWidget, QMenu, QAction, QDialog, QVBoxLayout,
                               QHBoxLayout, QLabel, QMessageBox, QProgressBar,
@@ -735,7 +734,6 @@ class BlacksmithWidget(QWidget):
         s.kb_state            = "idle"
         s.kb_active           = False
         s.space_queue         = 0
-        s.typing_pending      = False
         s.typing_wants_strike = False
         s.typing_charge       = 0
         s.typing_cooldown     = 0.0
@@ -761,7 +759,6 @@ class BlacksmithWidget(QWidget):
         s.kb_state            = "idle"
         s.kb_active           = False
         s.space_queue         = 0
-        s.typing_pending      = False
         s.typing_wants_strike = False
         s.typing_charge       = 0
         s.typing_cooldown     = 0.0
@@ -922,8 +919,8 @@ class BlacksmithWidget(QWidget):
             body  = "可在右鍵選單中裝備造型。"
         else:
             mat_type, amount = reward["material"]
-            mat_names = {"wood_scraps": "木材碎片", "iron_scraps": "鐵礦碎片", "gold_dust": "金塵"}
-            mat_name  = mat_names.get(mat_type, mat_type)
+            from game.metal import MATERIAL_LABELS
+            mat_name  = MATERIAL_LABELS.get(mat_type, mat_type)
             title = f"📦 寶箱已砸開！"
             body  = f"獲得 {mat_name} × {amount}"
 
@@ -1171,7 +1168,7 @@ class BlacksmithWidget(QWidget):
         def _bg():
             import update as upd
             from config import VERSION
-            from PyQt5.QtCore import QMetaObject, Qt
+            from PyQt5.QtCore import Qt
             info = upd.fetch_latest(timeout=8)
             if info is None:
                 # API 無法連線 → 通知主執行緒顯示含「手動下載」按鈕的對話框
@@ -1629,9 +1626,8 @@ class BlacksmithWidget(QWidget):
         self.update()
 
     def _draw_own_bubble(self, painter: QPainter):
-        from PyQt5.QtGui import QColor, QPen, QBrush, QFont, QPainterPath
+        from PyQt5.QtGui import QColor, QPen, QBrush, QFont
         from PyQt5.QtCore import QRectF
-        import math
 
         text  = self._own_bubble_text
         alpha = self._own_bubble_alpha  # 0.0–1.0
